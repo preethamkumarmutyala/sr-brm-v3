@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SR BRM Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap bar">
+      <img class="logo" src="assets/logo.png" alt="Secunderabad Randonneurs logo">
+      <div class="brand">
+        <h1>Secunderabad Randonneurs</h1>
+        <p>This week's rides, riders and results in one place</p>
+      </div>
+      <nav class="links" aria-label="Audax India links">
+        <a href="https://www.audaxindia.in/eventsv2.php" target="_blank" rel="noopener">Audax calendar</a>
+        <a href="https://www.audaxindia.in/member-login.php" target="_blank" rel="noopener">Rider login</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section id="tiles" class="tiles" aria-label="Events this week"></section>
+
+    <section id="detail" class="detail" aria-live="polite">
+      <p class="note">Loading events…</p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>Rider data is read from <a href="https://www.audaxindia.in" target="_blank" rel="noopener">audaxindia.in</a> and refreshes every 5 minutes. Registration and payment are done only on the Audax India website.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
