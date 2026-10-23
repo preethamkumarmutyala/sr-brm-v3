@@ -29,6 +29,12 @@ function closeDate(ev) {
   const d = new Date(`${m[3]}-${p(mon)}-${p(m[1])}T${p(m[4])}:${m[5]}:00+05:30`);
   return isNaN(d) ? null : d;
 }
+// just the "22-Oct-2026 at 23:59 hours" part, without any stray HTML from the source page
+const closeText = ev => {
+  const t = ev?.registrationClose || "";
+  const m = t.match(/\d{1,2}-[A-Za-z]{3}-\d{4}\s+at\s+\d{1,2}:\d{2}(?:\s*hours)?/);
+  return m ? m[0] : t.replace(/<[^>]+>/g, "").trim();
+};
 const isClosed = ev => { const d = closeDate(ev); return !!d && Date.now() >= d.getTime() + 60000; };
 const loading = msg => `<p class="note">${esc(msg)}</p>`;
 const LABELS = { registered: "Registered", ytc: "Yet to confirm", dns: "Did not start",
@@ -109,7 +115,7 @@ function renderDetail() {
         <dl class="facts">
           <dt>Start</dt><dd>${esc(ev.startTime || "Not announced")}</dd>
           <dt>Starting point</dt><dd>${esc(ev.startLocation || "Not announced")}</dd>
-          <dt>Registration closes</dt><dd>${esc(ev.registrationClose || "Not announced")} ${closed ? '<span class="tag dns">Closed</span>' : ""}</dd>
+          <dt>${closed ? "Registration closed" : "Registration closes"}</dt><dd>${esc(closeText(ev) || "Not announced")} ${closed ? '<span class="tag dns">Closed</span>' : ""}</dd>
         </dl>
       </div>
       <div class="actions">
@@ -221,7 +227,7 @@ async function ask() {
     ev.riders.map(r => `${esc(r.air)} - ${esc(r.name)}`).join("<br>");
   else if (q.includes("start time")) out.innerHTML = `${head}Start time: <b>${esc(ev.startTime)}</b>`;
   else if (q.includes("start location")) out.innerHTML = `${head}Start location: <b>${esc(ev.startLocation)}</b>`;
-  else if (q.includes("registration")) out.innerHTML = `${head}Registration closes: <b>${esc(ev.registrationClose)}</b>${isClosed(ev) ? " (closed)" : ""}`;
+  else if (q.includes("registration")) out.innerHTML = `${head}${isClosed(ev) ? "Registration closed" : "Registration closes"}: <b>${esc(closeText(ev))}</b>`;
   else if (q.includes("controls")) {
     const route = await fetchRoute(d);
     out.innerHTML = `<h3>${d} controls</h3>` + ((route?.controls || []).map(c => `${esc(c.km)} km - ${esc(c.location)}`).join("<br>") || "No controls listed yet.");
