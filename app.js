@@ -113,6 +113,15 @@ function renderTiles() {
 tilesEl.addEventListener("click", e => { const t = e.target.closest(".tile"); if (t) location.hash = t.dataset.d; });
 
 // ---------- event view ----------
+// copy each column heading onto its cells so tables can turn into stacked cards on phones
+function labelCells(root) {
+  root.querySelectorAll("table").forEach(t => {
+    const heads = [...t.querySelectorAll("thead th")].map(h => h.textContent.trim());
+    t.querySelectorAll("tbody tr").forEach(tr => [...tr.children].forEach((td, i) => {
+      if (heads[i] && td.colSpan === 1) td.dataset.label = heads[i];
+    }));
+  });
+}
 const table = (heads, rows) => `<div class="scroll"><table><thead><tr>${heads.map(h => `<th>${h}</th>`).join("")}</tr></thead>
   <tbody>${rows}</tbody></table></div>`;
 
@@ -185,6 +194,7 @@ function renderRows() {
   }).join("") : `<tr><td colspan="7" class="note">No riders match. Clear the search or choose "All riders".</td></tr>`;
   const t = ev.fetchedAt ? new Date(ev.fetchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
   document.getElementById("meta").textContent = `${list.length} of ${ev.riders.length} shown` + (t ? ` · updated ${t}` : "");
+  labelCells(detailEl);
 }
 
 function showError(msg, retry) {
@@ -217,6 +227,7 @@ function renderSR() {
   detailEl.innerHTML = `<h2>One Week SR riders</h2>
     <p class="note">Riders registered for all four rides (200, 300, 400 and 600 km): <b>${list.length}</b></p>
     ${table(["AIR no.", "Rider", "Club", ...ALL], rows || `<tr><td colspan="7" class="note">No rider is registered for all four rides yet.</td></tr>`)}`;
+  labelCells(detailEl);
 }
 
 // ---------- BRM Assistant ----------
