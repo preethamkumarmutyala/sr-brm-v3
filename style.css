@@ -86,3 +86,9 @@ tbody tr:nth-child(even) { background: #fafafa; }
 .ask input { flex: 1; padding: 9px 10px; border: 1px solid var(--line); border-radius: 4px; font: inherit; }
 #answer { line-height: 1.7; }
 .detail h2 { font-weight: 400; margin-top: 0; }
+
+/* registration closed */
+.closed { color: var(--bad); font-weight: 500; }
+.tile[aria-pressed="true"] .closed { color: #fff; }
+.btn.off { background: #e9ecef; color: var(--muted); border-color: var(--line); cursor: not-allowed; }
+.btn.off:hover { filter: none; }
