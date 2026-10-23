@@ -35,14 +35,26 @@ const closeText = ev => {
   const m = t.match(/\d{1,2}-[A-Za-z]{3}-\d{4}\s+at\s+\d{1,2}:\d{2}(?:\s*hours)?/);
   return m ? m[0] : t.replace(/<[^>]+>/g, "").trim();
 };
+// Ride start (Indian time) from "600 BRM on 24-Oct-2026" + "06:00"; null if it can't be read
+function startDate(ev) {
+  const d = (ev?.title || "").match(/(\d{1,2})-([A-Za-z]{3})-(\d{4})/);
+  const t = (ev?.startTime || "").match(/(\d{1,2}):(\d{2})/);
+  const mon = d && MONTHS[d[2].toLowerCase()];
+  if (!mon || !t) return null;
+  const p = n => String(n).padStart(2, "0");
+  const x = new Date(`${d[3]}-${p(mon)}-${p(d[1])}T${p(t[1])}:${t[2]}:00+05:30`);
+  return isNaN(x) ? null : x;
+}
+const hasStarted = ev => { const d = startDate(ev); return !d || Date.now() >= d.getTime(); };
 const isClosed = ev => { const d = closeDate(ev); return !!d && Date.now() >= d.getTime() + 60000; };
 const loading = msg => `<p class="note">${esc(msg)}</p>`;
 const LABELS = { registered: "Registered", ytc: "Yet to confirm", dns: "Did not start",
                  dnf: "Did not finish", lf: "Late finish", finished: "Finished" };
 
-function statusOf(r) {
+function statusOf(r, started = true) {
   const x = (r.result || "").trim().toUpperCase();
   if (!x) return "registered";
+  if (!started && x === "DNS") return "registered";   // Audax lists everyone as DNS until the ride starts
   if (["DNS", "DNF", "LF", "YTC"].includes(x)) return x.toLowerCase();
   return "finished";   // a finishing time such as "12h 07m"
 }
@@ -100,7 +112,8 @@ function renderDetail() {
   const route = routeCache[current];
   const closed = isClosed(ev);
   const riders = ev.riders || [];
-  const count = k => riders.filter(r => statusOf(r) === k).length;
+  const started = hasStarted(ev);
+  const count = k => riders.filter(r => statusOf(r, started) === k).length;
   const paid = riders.filter(r => /^y/i.test(r.fee)).length;
   const stats = [["Registered", riders.length], ["Fee paid", paid], ["Finished", count("finished") + count("lf")],
                  ["Did not start", count("dns")], ["Did not finish", count("dnf")]]
@@ -151,10 +164,11 @@ function renderDetail() {
 function renderRows() {
   const ev = cache[current]; if (!ev) return;
   const q = query.trim().toLowerCase();
-  const list = ev.riders.filter(r => (filter === "all" || statusOf(r) === filter) &&
+  const started = hasStarted(ev);
+  const list = ev.riders.filter(r => (filter === "all" || statusOf(r, started) === filter) &&
     (!q || [r.name, r.air, r.club].some(v => (v || "").toLowerCase().includes(q))));
   document.getElementById("rows").innerHTML = list.length ? list.map(r => {
-    const s = statusOf(r), label = s === "finished" ? r.result : LABELS[s];
+    const s = statusOf(r, started), label = s === "finished" ? r.result : LABELS[s];
     return `<tr><td>${esc(r.seq)}</td><td>${esc(r.name)}</td><td>${esc(r.air)}</td><td>${esc(r.club)}</td>
       <td>${esc(r.fee)}</td><td>${esc(r.medal)}</td><td><span class="tag ${s}">${esc(label)}</span></td></tr>`;
   }).join("") : `<tr><td colspan="7" class="note">No riders match. Clear the search or choose "All riders".</td></tr>`;
