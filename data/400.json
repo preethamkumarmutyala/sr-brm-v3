@@ -1,0 +1,188 @@
+{
+  "event": "400 BRM",
+  "routeName": "MEGA-400 2025",
+  "distance": 414.6,
+  "startLocation": "Open Ground near Kendriya Vidyalaya",
+  "startTime": "06:00",
+  "rideWithGps": "https://ridewithgps.com/routes/49468783",
+
+  "controls": [
+    {
+      "km": 89.7,
+      "location": "ZYKA Restaurant LHS",
+      "type": "CONTROL"
+    },
+    {
+      "km": 106.2,
+      "location": "Take Left towards Kamareddy",
+      "type": "CONTROL"
+    },
+    {
+      "km": 207.5,
+      "location": "Gamjal Toll Plaza",
+      "type": "CONTROL"
+    },
+    {
+      "km": 301.1,
+      "location": "Hotel Amrutha Grand",
+      "type": "CONTROL"
+    },
+    {
+      "km": 325.5,
+      "location": "ZYKA Restaurant RHS",
+      "type": "CONTROL"
+    },
+    {
+      "km": 414.6,
+      "location": "Open Ground near Kendriya Vidyalaya",
+      "type": "FINISH"
+    }
+  ],
+
+  "cueSheet": [
+    {
+      "km": 0.0,
+      "instruction": "START - Open Ground near Kendriya Vidyalaya"
+    },
+    {
+      "km": 0.6,
+      "instruction": "Take Left"
+    },
+    {
+      "km": 0.8,
+      "instruction": "Take Left from Secunderabad Club"
+    },
+    {
+      "km": 4.2,
+      "instruction": "Take Left to Militry Dairyfarm Road"
+    },
+    {
+      "km": 8.6,
+      "instruction": "Take Left on Nagpur Highway"
+    },
+    {
+      "km": 9.2,
+      "instruction": "Make a U-Turn on Nagpur Highway"
+    },
+    {
+      "km": 11.1,
+      "instruction": "Suchitra X Roads Continue Straight"
+    },
+    {
+      "km": 18.0,
+      "instruction": "Kompally Flyover"
+    },
+    {
+      "km": 46.1,
+      "instruction": "Toopran Toll Gate - Continue Straight"
+    },
+    {
+      "km": 54.6,
+      "instruction": "CCD - Continue Straight"
+    },
+    {
+      "km": 59.1,
+      "instruction": "Sher-E-Punjab LHS"
+    },
+    {
+      "km": 86.1,
+      "instruction": "Ramayanpet Flyover Continue Straight"
+    },
+    {
+      "km": 89.7,
+      "instruction": "CONTROL - ZYKA Restaurant LHS"
+    },
+    {
+      "km": 97.2,
+      "instruction": "Bhiknoor Toll Plaza Continue Straight"
+    },
+    {
+      "km": 106.2,
+      "instruction": "CONTROL - Take Left towards Kamareddy"
+    },
+    {
+      "km": 108.6,
+      "instruction": "Railway Crossing Continue Straight"
+    },
+    {
+      "km": 114.0,
+      "instruction": "Hotel Amrutha Grand"
+    },
+    {
+      "km": 116.0,
+      "instruction": "Take Left to be on Nagpur Highway"
+    },
+    {
+      "km": 152.0,
+      "instruction": "Dichpally Flyover Continue Straight"
+    },
+    {
+      "km": 207.5,
+      "instruction": "CONTROL - Gamjal Toll Plaza"
+    },
+    {
+      "km": 263.5,
+      "instruction": "Dichpally Flyover Continue Straight"
+    },
+    {
+      "km": 299.2,
+      "instruction": "Hotel Samanya Palace - Take Right towards Kamareddy"
+    },
+    {
+      "km": 301.1,
+      "instruction": "CONTROL - Hotel Amrutha Grand"
+    },
+    {
+      "km": 308.4,
+      "instruction": "Take Right towards Nagpur-HYD Highway"
+    },
+    {
+      "km": 318.0,
+      "instruction": "Bhiknoor Toll Plaza Continue Straight"
+    },
+    {
+      "km": 325.5,
+      "instruction": "CONTROL - ZYKA Restaurant RHS"
+    },
+    {
+      "km": 356.2,
+      "instruction": "Sher-E-Punjab RHS"
+    },
+    {
+      "km": 369.1,
+      "instruction": "Toopran Toll Gate - Continue Straight"
+    },
+    {
+      "km": 388.5,
+      "instruction": "Medchal Continue Straight"
+    },
+    {
+      "km": 392.5,
+      "instruction": "ORR Underpass"
+    },
+    {
+      "km": 403.7,
+      "instruction": "Suchitra X Roads Continue Straight"
+    },
+    {
+      "km": 405.7,
+      "instruction": "Take Left to Militry Dairyfarm Road"
+    },
+    {
+      "km": 410.3,
+      "instruction": "Take Right"
+    },
+    {
+      "km": 413.8,
+      "instruction": "Take Right from Secunderabad Club"
+    },
+    {
+      "km": 414.0,
+      "instruction": "Take Right to Kendriya Vidyalaya Road"
+    },
+    {
+      "km": 414.6,
+      "instruction": "FINISH - Open Ground near Kendriya Vidyalaya"
+    }
+  ]
+}

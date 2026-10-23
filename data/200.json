@@ -1,0 +1,139 @@
+{
+  "event": "200 BRM",
+  "routeName": "MEGA-200 2025",
+  "distance": 211.7,
+  "startLocation": "Open Ground near Kendriya Vidyalaya",
+  "startTime": "06:00",
+
+  "rideWithGps": "https://ridewithgps.com/routes/49469273",
+
+  "controls": [
+    {
+      "km": 46.1,
+      "location": "Toopran Toll Gate Continue Straight",
+      "type": "CONTROL"
+    },
+    {
+      "km": 105.7,
+      "location": "Kamareddy Entrance UTurn",
+      "type": "CONTROL"
+    },
+    {
+      "km": 165.3,
+      "location": "Toopran Toll Gate Continue Straight",
+      "type": "CONTROL"
+    },
+    {
+      "km": 211.7,
+      "location": "Open Ground near Kendriya Vidyalaya",
+      "type": "FINISH"
+    }
+  ],
+
+  "cueSheet": [
+    {
+      "km": 0.0,
+      "instruction": "START - Open Ground near Kendriya Vidyalaya"
+    },
+    {
+      "km": 0.6,
+      "instruction": "Take Left"
+    },
+    {
+      "km": 0.8,
+      "instruction": "Take Left from Secunderabad Club"
+    },
+    {
+      "km": 4.2,
+      "instruction": "Take Left to Military Dairy Farm Road"
+    },
+    {
+      "km": 8.6,
+      "instruction": "Take Left on Nagpur Highway"
+    },
+    {
+      "km": 9.2,
+      "instruction": "Make U-Turn on Nagpur Highway"
+    },
+    {
+      "km": 11.1,
+      "instruction": "Suchitra X Roads Continue Straight"
+    },
+    {
+      "km": 18.0,
+      "instruction": "Kompally Flyover"
+    },
+    {
+      "km": 46.1,
+      "instruction": "CONTROL - Toopran Toll Gate Continue Straight"
+    },
+    {
+      "km": 54.6,
+      "instruction": "CCD Continue Straight"
+    },
+    {
+      "km": 59.1,
+      "instruction": "Sher-E-Punjab LHS"
+    },
+    {
+      "km": 86.1,
+      "instruction": "Ramayampet Flyover Continue Straight"
+    },
+    {
+      "km": 89.7,
+      "instruction": "ZYKA Restaurant LHS"
+    },
+    {
+      "km": 97.2,
+      "instruction": "Bhiknoor Toll Plaza Continue Straight"
+    },
+    {
+      "km": 105.7,
+      "instruction": "CONTROL - Kamareddy Entrance UTurn"
+    },
+    {
+      "km": 121.7,
+      "instruction": "ZYKA Restaurant RHS"
+    },
+    {
+      "km": 152.4,
+      "instruction": "Sher-E-Punjab RHS"
+    },
+    {
+      "km": 165.3,
+      "instruction": "CONTROL - Toopran Toll Gate Continue Straight"
+    },
+    {
+      "km": 185.3,
+      "instruction": "Medchal Continue Straight"
+    },
+    {
+      "km": 189.3,
+      "instruction": "ORR Underpass"
+    },
+    {
+      "km": 200.6,
+      "instruction": "Suchitra X Roads Continue Straight"
+    },
+    {
+      "km": 202.6,
+      "instruction": "Take Left to Military Dairy Farm Road"
+    },
+    {
+      "km": 207.2,
+      "instruction": "Take Right"
+    },
+    {
+      "km": 210.9,
+      "instruction": "Take Right from Secunderabad Club"
+    },
+    {
+      "km": 211.1,
+      "instruction": "Take Right to Kendriya Vidyalaya Road"
+    },
+    {
+      "km": 211.7,
+      "instruction": "FINISH - Open Ground near Kendriya Vidyalaya"
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+[
+  {
+    "id": "1000",
+    "name": "1000 BRM",
+    "date": "01-Oct-2026",
+    "registrationClose": "27-Sep-2026 23:59",
+    "registered": 7,
+    "start": "Decathlon Uppal",
+    "route": "https://ridewithgps.com/routes/52862280",
+    "controls": [
+      {
+        "km": 126,
+        "location": "Vididhi Hotel"
+      },
+      {
+        "km": 229,
+        "location": "Temple Nekarikallu X Road"
+      },
+      {
+        "km": 282.5,
+        "location": "Kondaveedu Fort Top"
+      },
+      {
+        "km": 350,
+        "location": "Sai Grand Lodge"
+      },
+      {
+        "km": 437.3,
+        "location": "Nagarjuna Sagar Dam"
+      }
+    ]
+  },
+  {
+    "id": "600",
+    "name": "600 BRM",
+    "date": "24-Oct-2026",
+    "registrationClose": "22-Oct-2026 23:59",
+    "registered": 0,
+    "start": "Open Ground near Kendriya Vidyalaya",
+    "route": "https://ridewithgps.com/routes/44588666",
+    "controls": [
+      {
+        "km": 89.7,
+        "location": "ZYKA Restaurant"
+      }
+    ]
+  },
+  {
+    "id": "400",
+    "name": "400 BRM",
+    "date": "30-Oct-2026",
+    "registrationClose": "22-Oct-2026 00:00",
+    "registered": 0,
+    "start": "Open Ground near Kendriya Vidyalaya",
+    "route": "",
+    "controls": []
+  },
+  {
+    "id": "300",
+    "name": "300 BRM",
+    "date": "28-Oct-2026",
+    "registrationClose": "22-Oct-2026 23:59",
+    "registered": 0,
+    "start": "Open Ground near Kendriya Vidyalaya",
+    "route": "",
+    "controls": []
+  },
+  {
+    "id": "200",
+    "name": "200 BRM",
+    "date": "27-Oct-2026",
+    "registrationClose": "22-Oct-2026 23:59",
+    "registered": 0,
+    "start": "Open Ground near Kendriya Vidyalaya",
+    "route": "https://ridewithgps.com/routes/49469273",
+    "controls": []
+  }
+]

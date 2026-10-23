@@ -1,0 +1,56 @@
+{
+  "event": "300 BRM",
+  "routeName": "300 - Gunrock to Karimnagar",
+  "distance": 304.2,
+  "startLocation": "Open Ground near Kendriya Vidyala",
+  "startTime": "06:00",
+  "rideWithGps": "https://ridewithgps.com/routes/46588152",
+  "controls": [
+    {
+      "km": 90.4,
+      "location": "DUDDEDA TOLL PLAZA",
+      "type": "CONTROL"
+    },
+    {
+      "km": 152.6,
+      "location": "ROYAL BAWARCHI",
+      "type": "CONTROL"
+    },
+    {
+      "km": 221.0,
+      "location": "DUDDEDA TOLL PLAZA",
+      "type": "CONTROL"
+    },
+    {
+      "km": 304.2,
+      "location": "Open Ground near Kendriya Vidyala",
+      "type": "FINISH"
+    }
+  ],
+  "cueSheet": [
+    { "km": 0.0, "instruction": "START - Open Ground near Kendriya Vidyala" },
+    { "km": 0.2, "instruction": "Take Left" },
+    { "km": 2.8, "instruction": "Take Left at Secunderabad Club Junction" },
+    { "km": 10.9, "instruction": "Tirmalgiri X Roads Continue Straight" },
+    { "km": 17.9, "instruction": "Hakimpet Airforce Station" },
+    { "km": 21.7, "instruction": "ORR Underpass" },
+    { "km": 52.4, "instruction": "Shamirpet Lake" },
+    { "km": 82.0, "instruction": "Pragnapur" },
+    { "km": 90.4, "instruction": "CONTROL - DUDDEDA TOLL PLAZA" },
+    { "km": 94.4, "instruction": "Slide Left to reach Siddipet Town" },
+    { "km": 97.9, "instruction": "Take Right Turn from Ambedkar Circle" },
+    { "km": 126.1, "instruction": "Exit to Highway towards Karimnagar" },
+    { "km": 152.4, "instruction": "Thotapally" },
+    { "km": 152.6, "instruction": "CONTROL - ROYAL BAWARCHI" },
+    { "km": 179.0, "instruction": "Thotapally" },
+    { "km": 213.0, "instruction": "Malgudi Mayuri Hotel Siddipet entry / exit" },
+    { "km": 221.0, "instruction": "CONTROL - DUDDEDA TOLL PLAZA" },
+    { "km": 251.0, "instruction": "Pragnapur" },
+    { "km": 281.0, "instruction": "Shamirpet Lake" },
+    { "km": 285.3, "instruction": "ORR Underpass" },
+    { "km": 297.3, "instruction": "Lothukunta" },
+    { "km": 303.4, "instruction": "Take Right from Secunderabad Club Junction" },
+    { "km": 303.6, "instruction": "Take Right to reach end point" },
+    { "km": 304.2, "instruction": "FINISH - Open Ground near Kendriya Vidyala" }
+  ]
+}
