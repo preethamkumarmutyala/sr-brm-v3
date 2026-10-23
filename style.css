@@ -126,4 +126,9 @@ tbody tr:nth-child(even) { background: #fafafa; }
   #rows td[data-label="Fee paid"]::before { content: "Fee paid: "; }
   #rows td[data-label="Medal"] { grid-column: 2 / 4; grid-row: 3; color: var(--muted); font-size: .8rem; }
   #rows td[data-label="Medal"]::before { content: "Medal: "; }
+  #rows td[data-label="Result"] { grid-column: 1 / 4; grid-row: 4; color: var(--muted); font-size: .8rem; }
+  #rows td[data-label="Result"]::before { content: "Result: "; }
+  #rows td.res:empty { display: none; }
 }
+
+.res:empty::after { content: "—"; color: var(--muted); }
