@@ -189,8 +189,7 @@ function renderRows() {
     (!q || [r.name, r.air, r.club].some(v => (v || "").toLowerCase().includes(q))));
   document.getElementById("rows").innerHTML = list.length ? list.map(r => {
     const s = statusOf(r, started), label = LABELS[s];
-    const raw = (r.result || "").trim();
-    const res = !started && raw.toUpperCase() === "DNS" ? "" : raw;   // Audax's own result (time, DNF, LF...), blank until there is one
+    const res = (r.result || "").trim();   // exactly what Audax shows in its Result column
     return `<tr><td>${esc(r.seq)}</td><td>${esc(r.name)}</td><td>${esc(r.air)}</td><td>${esc(r.club)}</td>
       <td>${esc(r.fee)}</td><td>${esc(r.medal)}</td><td class="res">${esc(res)}</td><td><span class="tag ${s}">${esc(label)}</span></td></tr>`;
   }).join("") : `<tr><td colspan="8" class="note">No riders match. Clear the search or choose "All riders".</td></tr>`;
