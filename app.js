@@ -19,6 +19,17 @@ let current = null, query = "", filter = "all";
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+// "22-Oct-2026 at 23:59 hours" (Audax shows Indian time) -> Date, or null if it can't be read
+function closeDate(ev) {
+  const m = (ev?.registrationClose || "").match(/(\d{1,2})-([A-Za-z]{3})-(\d{4})\s+at\s+(\d{1,2}):(\d{2})/);
+  const mon = m && MONTHS[m[2].toLowerCase()];
+  if (!mon) return null;
+  const p = n => String(n).padStart(2, "0");
+  const d = new Date(`${m[3]}-${p(mon)}-${p(m[1])}T${p(m[4])}:${m[5]}:00+05:30`);
+  return isNaN(d) ? null : d;
+}
+const isClosed = ev => { const d = closeDate(ev); return !!d && Date.now() >= d.getTime() + 60000; };
 const loading = msg => `<p class="note">${esc(msg)}</p>`;
 const LABELS = { registered: "Registered", ytc: "Yet to confirm", dns: "Did not start",
                  dnf: "Did not finish", lf: "Late finish", finished: "Finished" };
@@ -63,7 +74,8 @@ function renderTiles() {
   const ev = ORDER.map(d => `<button class="tile" data-d="${d}" aria-pressed="${d === current}">
       <b>${d} km</b>
       <span>${esc(cache[d]?.startTime || "Start time to be announced")}</span>
-      <span>${cache[d] ? cache[d].riderCount + " registered" : "Loading…"}</span></button>`).join("");
+      <span>${cache[d] ? cache[d].riderCount + " registered" : "Loading…"}</span>
+      ${isClosed(cache[d]) ? '<span class="closed">Registration closed</span>' : ""}</button>`).join("");
   const tools = `
     <button class="tile" data-d="sr" aria-pressed="${current === "sr"}"><b>One Week SR</b>
       <span>${sr ? sr.length + " riders in all 4 rides" : "Loading…"}</span></button>
@@ -80,6 +92,7 @@ const table = (heads, rows) => `<div class="scroll"><table><thead><tr>${heads.ma
 function renderDetail() {
   const ev = cache[current]; if (!ev) return;
   const route = routeCache[current];
+  const closed = isClosed(ev);
   const riders = ev.riders || [];
   const count = k => riders.filter(r => statusOf(r) === k).length;
   const paid = riders.filter(r => /^y/i.test(r.fee)).length;
@@ -96,12 +109,13 @@ function renderDetail() {
         <dl class="facts">
           <dt>Start</dt><dd>${esc(ev.startTime || "Not announced")}</dd>
           <dt>Starting point</dt><dd>${esc(ev.startLocation || "Not announced")}</dd>
-          <dt>Registration closes</dt><dd>${esc(ev.registrationClose || "Not announced")}</dd>
+          <dt>Registration closes</dt><dd>${esc(ev.registrationClose || "Not announced")} ${closed ? '<span class="tag dns">Closed</span>' : ""}</dd>
         </dl>
       </div>
       <div class="actions">
         <a class="btn" href="${ROUTES[current]}" target="_blank" rel="noopener">View route</a>
-        <a class="btn alt" href="${AUDAX}/event-e-${EVENT_IDS[current]}" target="_blank" rel="noopener">Register on Audax India</a>
+        ${closed ? '<span class="btn off" aria-disabled="true">Registration closed</span>'
+                 : `<a class="btn alt" href="${AUDAX}/event-e-${EVENT_IDS[current]}" target="_blank" rel="noopener">Register on Audax India</a>`}
         <a class="btn alt" href="${AUDAX}/member-login.php" target="_blank" rel="noopener">Rider login</a>
       </div>
     </div>
@@ -207,7 +221,7 @@ async function ask() {
     ev.riders.map(r => `${esc(r.air)} - ${esc(r.name)}`).join("<br>");
   else if (q.includes("start time")) out.innerHTML = `${head}Start time: <b>${esc(ev.startTime)}</b>`;
   else if (q.includes("start location")) out.innerHTML = `${head}Start location: <b>${esc(ev.startLocation)}</b>`;
-  else if (q.includes("registration")) out.innerHTML = `${head}Registration closes: <b>${esc(ev.registrationClose)}</b>`;
+  else if (q.includes("registration")) out.innerHTML = `${head}Registration closes: <b>${esc(ev.registrationClose)}</b>${isClosed(ev) ? " (closed)" : ""}`;
   else if (q.includes("controls")) {
     const route = await fetchRoute(d);
     out.innerHTML = `<h3>${d} controls</h3>` + ((route?.controls || []).map(c => `${esc(c.km)} km - ${esc(c.location)}`).join("<br>") || "No controls listed yet.");
