@@ -170,7 +170,7 @@ function renderDetail() {
       <button class="btn alt" id="refresh" type="button">Refresh</button>
     </div>
     <div class="scroll"><table>
-      <thead><tr><th>#</th><th>Rider</th><th>AIR no.</th><th>Club</th><th>Fee paid</th><th>Medal</th><th>Status</th></tr></thead>
+      <thead><tr><th>#</th><th>Rider</th><th>AIR no.</th><th>Club</th><th>Fee paid</th><th>Medal</th><th>Result</th><th>Status</th></tr></thead>
       <tbody id="rows"></tbody></table></div>
     ${controls ? `<h3 class="sec">Controls</h3>${table(["KM", "Location", "Type"], controls)}` : ""}
     ${cues ? `<h3 class="sec">Cue sheet</h3>${table(["KM", "Instruction"], cues)}` : ""}`;
@@ -188,10 +188,12 @@ function renderRows() {
   const list = ev.riders.filter(r => (filter === "all" || statusOf(r, started) === filter) &&
     (!q || [r.name, r.air, r.club].some(v => (v || "").toLowerCase().includes(q))));
   document.getElementById("rows").innerHTML = list.length ? list.map(r => {
-    const s = statusOf(r, started), label = s === "finished" ? r.result : LABELS[s];
+    const s = statusOf(r, started), label = LABELS[s];
+    const raw = (r.result || "").trim();
+    const res = !started && raw.toUpperCase() === "DNS" ? "" : raw;   // Audax's own result (time, DNF, LF...), blank until there is one
     return `<tr><td>${esc(r.seq)}</td><td>${esc(r.name)}</td><td>${esc(r.air)}</td><td>${esc(r.club)}</td>
-      <td>${esc(r.fee)}</td><td>${esc(r.medal)}</td><td><span class="tag ${s}">${esc(label)}</span></td></tr>`;
-  }).join("") : `<tr><td colspan="7" class="note">No riders match. Clear the search or choose "All riders".</td></tr>`;
+      <td>${esc(r.fee)}</td><td>${esc(r.medal)}</td><td class="res">${esc(res)}</td><td><span class="tag ${s}">${esc(label)}</span></td></tr>`;
+  }).join("") : `<tr><td colspan="8" class="note">No riders match. Clear the search or choose "All riders".</td></tr>`;
   const t = ev.fetchedAt ? new Date(ev.fetchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
   document.getElementById("meta").textContent = `${list.length} of ${ev.riders.length} shown` + (t ? ` · updated ${t}` : "");
   labelCells(detailEl);
