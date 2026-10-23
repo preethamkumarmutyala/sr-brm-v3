@@ -8,6 +8,9 @@ const ROUTES = {
   "300": "https://ridewithgps.com/routes/46588152",
   "400": "https://ridewithgps.com/routes/49468783"
 };
+// Start location on Google Maps (same link used for every event; edit here if one differs)
+const MAPS = "https://maps.app.goo.gl/Fhmnyr6gbKszavAD7";
+const MAP_EMBED = "https://www.google.com/maps?q=17.455080,78.494962&z=16&output=embed";
 const ORDER = ["600", "200", "300", "400"];   // tile order (by ride date this week)
 const ALL = ["200", "300", "400", "600"];
 const REFRESH_MS = 5 * 60 * 1000;
@@ -47,6 +50,12 @@ function startDate(ev) {
 }
 const hasStarted = ev => { const d = startDate(ev); return !d || Date.now() >= d.getTime(); };
 const isClosed = ev => { const d = closeDate(ev); return !!d && Date.now() >= d.getTime() + 60000; };
+// "06:00" -> "06:00 AM", "14:30" -> "02:30 PM" (leaves text alone if AM/PM is already there)
+const fmtTime = t => {
+  t = String(t || "");
+  if (/\b(am|pm)\b/i.test(t)) return t;
+  return t.replace(/(\d{1,2}):(\d{2})/, (_, h, m) => `${String(+h % 12 || 12).padStart(2, "0")}:${m} ${+h >= 12 ? "PM" : "AM"}`);
+};
 const loading = msg => `<p class="note">${esc(msg)}</p>`;
 const LABELS = { registered: "Registered", ytc: "Yet to confirm", dns: "Did not start",
                  dnf: "Did not finish", lf: "Late finish", finished: "Finished" };
@@ -91,7 +100,7 @@ function renderTiles() {
   const sr = srRiders();
   const ev = ORDER.map(d => `<button class="tile" data-d="${d}" aria-pressed="${d === current}">
       <b>${d} km</b>
-      <span>${esc(cache[d]?.startTime || "Start time to be announced")}</span>
+      <span>${esc(fmtTime(cache[d]?.startTime) || "Start time to be announced")}</span>
       <span>${cache[d] ? cache[d].riderCount + " registered" : "Loading…"}</span>
       ${isClosed(cache[d]) ? '<span class="closed">Registration closed</span>' : ""}</button>`).join("");
   const tools = `
@@ -123,13 +132,15 @@ function renderDetail() {
 
   detailEl.innerHTML = `
     <div class="head">
-      <div>
+      <div class="info">
         <h2>${esc(ev.title || current + " km BRM")}</h2>
         <dl class="facts">
-          <dt>Start</dt><dd>${esc(ev.startTime || "Not announced")}</dd>
-          <dt>Starting point</dt><dd>${esc(ev.startLocation || "Not announced")}</dd>
+          <dt>Start</dt><dd>${esc(fmtTime(ev.startTime) || "Not announced")}</dd>
+          <dt>Starting point</dt><dd>${esc(ev.startLocation || "Not announced")}
+            <a href="${MAPS}" target="_blank" rel="noopener">Open in Google Maps</a></dd>
           <dt>${closed ? "Registration closed" : "Registration closes"}</dt><dd>${esc(closeText(ev) || "Not announced")} ${closed ? '<span class="tag dns">Closed</span>' : ""}</dd>
         </dl>
+        <iframe class="map" title="Start location map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="${MAP_EMBED}"></iframe>
       </div>
       <div class="actions">
         <a class="btn" href="${ROUTES[current]}" target="_blank" rel="noopener">View route</a>
@@ -239,8 +250,8 @@ async function ask() {
 
   if (q.includes("riders")) out.innerHTML = `${head}Riders: <b>${ev.riderCount}</b><hr>` +
     ev.riders.map(r => `${esc(r.air)} - ${esc(r.name)}`).join("<br>");
-  else if (q.includes("start time")) out.innerHTML = `${head}Start time: <b>${esc(ev.startTime)}</b>`;
-  else if (q.includes("start location")) out.innerHTML = `${head}Start location: <b>${esc(ev.startLocation)}</b>`;
+  else if (q.includes("start time")) out.innerHTML = `${head}Start time: <b>${esc(fmtTime(ev.startTime))}</b>`;
+  else if (q.includes("start location")) out.innerHTML = `${head}Start location: <b>${esc(ev.startLocation)}</b> <a href="${MAPS}" target="_blank" rel="noopener">Open in Google Maps</a>`;
   else if (q.includes("registration")) out.innerHTML = `${head}${isClosed(ev) ? "Registration closed" : "Registration closes"}: <b>${esc(closeText(ev))}</b>`;
   else if (q.includes("controls")) {
     const route = await fetchRoute(d);
