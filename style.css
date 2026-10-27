@@ -132,3 +132,11 @@ tbody tr:nth-child(even) { background: #fafafa; }
 }
 
 .res:empty::after { content: "—"; color: var(--muted); }
+
+/* numbers (km, times) stay narrow, aligned and on one line */
+th.num, td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+td.num { width: 1%; }
+@media (max-width: 700px) { td.num { width: auto; } }
+
+/* control rows inside the cue sheet */
+tbody tr.ctl { background: #fff3ee; font-weight: 500; }
