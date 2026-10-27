@@ -80,7 +80,7 @@ async function fetchEvent(d, force) {
 async function fetchRoute(d, force) {   // controls + cue sheet: Audax route card via the Worker, else data/<distance>.json
   if (!force && routeCache[d] !== undefined) return routeCache[d];
   try {
-    const r = await fetch(`${API_BASE}/route/${d}`);
+    const r = await fetch(`${API_BASE}/route/${d}?v=2`);   // ?v=2 skips any copy of the first (wrongly read) answer saved in browsers
     const j = r.ok ? await r.json() : null;
     if (j && !j.error && j.cue?.length) return (routeCache[d] = j);
   } catch (_) { /* fall through to the backup file */ }
