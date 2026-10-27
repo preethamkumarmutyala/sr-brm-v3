@@ -6,7 +6,7 @@ const ROUTES = {
   "600": "https://ridewithgps.com/routes/44588666",
   "200": "https://ridewithgps.com/routes/49469273",
   "300": "https://ridewithgps.com/routes/46588152",
-  "400": "https://ridewithgps.com/routes/49468783"
+  "400": "https://ridewithgps.com/routes/46699028"
 };
 // Start location on Google Maps (same link used for every event; edit here if one differs)
 const MAPS = "https://maps.app.goo.gl/Fhmnyr6gbKszavAD7";
@@ -77,10 +77,21 @@ async function fetchEvent(d, force) {
   if (data.error) throw new Error(data.error);
   return (cache[d] = data);
 }
-async function fetchRoute(d) {          // controls and cue sheet from data/<distance>.json
-  if (routeCache[d] !== undefined) return routeCache[d];
-  try { const r = await fetch(`data/${d}.json`); routeCache[d] = r.ok ? await r.json() : null; }
-  catch (_) { routeCache[d] = null; }
+async function fetchRoute(d, force) {   // controls + cue sheet: Audax route card via the Worker, else data/<distance>.json
+  if (!force && routeCache[d] !== undefined) return routeCache[d];
+  try {
+    const r = await fetch(`${API_BASE}/route/${d}`);
+    const j = r.ok ? await r.json() : null;
+    if (j && !j.error && j.cue?.length) return (routeCache[d] = j);
+  } catch (_) { /* fall through to the backup file */ }
+  try {
+    const r = await fetch(`data/${d}.json`);
+    const j = r.ok ? await r.json() : null;
+    routeCache[d] = j ? {
+      controls: (j.controls || []).map(c => ({ location: c.location, type: c.type, km: c.km })),
+      cue: (j.cueSheet || []).map(c => ({ location: c.instruction, km: c.km }))
+    } : null;
+  } catch (_) { routeCache[d] = null; }
   return routeCache[d];
 }
 const loadAll = force => Promise.allSettled(ALL.map(d => fetchEvent(d, force)));
@@ -122,8 +133,11 @@ function labelCells(root) {
     }));
   });
 }
-const table = (heads, rows) => `<div class="scroll"><table><thead><tr>${heads.map(h => `<th>${h}</th>`).join("")}</tr></thead>
+// heads: "Name" or ["Name", "num"] (num = right-aligned number column)
+const table = (heads, rows) => `<div class="scroll"><table><thead><tr>${heads.map(h => {
+  const [t, c] = [].concat(h); return `<th${c ? ` class="${c}"` : ""}>${t}</th>`; }).join("")}</tr></thead>
   <tbody>${rows}</tbody></table></div>`;
+const km2 = v => (v !== "" && v != null && isFinite(+v)) ? (+v).toFixed(2) : (v ?? "");   // 89.7 -> 89.70, like the official sheet
 
 function renderDetail() {
   const ev = cache[current]; if (!ev) return;
@@ -136,8 +150,21 @@ function renderDetail() {
   const stats = [["Registered", riders.length], ["Fee paid", paid], ["Finished", count("finished") + count("lf")],
                  ["Did not start", count("dns")], ["Did not finish", count("dnf")]]
     .map(([l, n]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join("");
-  const controls = (route?.controls || []).map(c => `<tr><td>${esc(c.km)}</td><td>${esc(c.location)}</td><td>${esc(c.type)}</td></tr>`).join("");
-  const cues = (route?.cueSheet || []).map(c => `<tr><td>${esc(c.km)}</td><td>${esc(c.instruction)}</td></tr>`).join("");
+  // Controls and cue sheet come from the Audax route card: Location, Type, then distances and times
+  const ctl = route?.controls || [];
+  const ctlTimes = ctl.some(c => c.open || c.close);
+  const when = v => (v ? esc(fmtTime(v)) : "");
+  const controls = ctl.map(c => `<tr><td>${esc(c.location)}</td><td>${esc(c.type)}</td><td class="num">${esc(km2(c.km))}</td>` +
+    (ctlTimes ? `<td class="num">${when(c.open)}</td><td class="num">${when(c.close)}</td>` : "") + `</tr>`).join("");
+  const controlHeads = ["Location", "Type", ["KM", "num"], ...(ctlTimes ? [["Opens", "num"], ["Closes", "num"]] : [])];
+  const cue = route?.cue || [];
+  const cueType = cue.some(c => c.type);
+  const cues = cue.map((c, i) => {
+    const prev = i ? +cue[i - 1].km : 0;
+    const partial = c.partial ? c.partial : (isFinite(+c.km) && isFinite(prev) ? (+c.km - prev).toFixed(2) : "");
+    return `<tr${c.control ? ' class="ctl"' : ""}><td>${esc(c.location)}</td>${cueType ? `<td>${esc(c.type)}</td>` : ""}<td class="num">${esc(km2(partial))}</td><td class="num">${esc(km2(c.km))}</td></tr>`;
+  }).join("");
+  const cueHeads = ["Location", ...(cueType ? ["Type"] : []), ["Partial km", "num"], ["Total km", "num"]];
 
   detailEl.innerHTML = `
     <div class="head">
@@ -148,11 +175,12 @@ function renderDetail() {
           <dt>Starting point</dt><dd>${esc(ev.startLocation || "Not announced")}
             <a href="${MAPS}" target="_blank" rel="noopener">Open in Google Maps</a></dd>
           <dt>${closed ? "Registration closed" : "Registration closes"}</dt><dd>${esc(closeText(ev) || "Not announced")} ${closed ? '<span class="tag dns">Closed</span>' : ""}</dd>
+          ${route?.info?.distance ? `<dt>Distance</dt><dd>${esc(km2(route.info.distance))} km${route.info.brevet ? ` (${esc(route.info.brevet)} km brevet)` : ""}</dd>` : ""}
         </dl>
         <iframe class="map" title="Start location map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="${MAP_EMBED}"></iframe>
       </div>
       <div class="actions">
-        <a class="btn" href="${ROUTES[current]}" target="_blank" rel="noopener">View route</a>
+        <a class="btn" href="${esc(ev.routeMap || ROUTES[current])}" target="_blank" rel="noopener">View route</a>
         ${closed ? '<span class="btn off" aria-disabled="true">Registration closed</span>'
                  : `<a class="btn alt" href="${AUDAX}/event-e-${EVENT_IDS[current]}" target="_blank" rel="noopener">Register on Audax India</a>`}
         <a class="btn alt" href="${AUDAX}/member-login.php" target="_blank" rel="noopener">Rider login</a>
@@ -172,8 +200,8 @@ function renderDetail() {
     <div class="scroll"><table>
       <thead><tr><th>#</th><th>Rider</th><th>AIR no.</th><th>Club</th><th>Fee paid</th><th>Medal</th><th>Result</th><th>Status</th></tr></thead>
       <tbody id="rows"></tbody></table></div>
-    ${controls ? `<h3 class="sec">Controls</h3>${table(["KM", "Location", "Type"], controls)}` : ""}
-    ${cues ? `<h3 class="sec">Cue sheet</h3>${table(["KM", "Instruction"], cues)}` : ""}`;
+    ${controls ? `<h3 class="sec">Controls</h3>${table(controlHeads, controls)}` : ""}
+    ${cues ? `<h3 class="sec">Cue sheet</h3>${table(cueHeads, cues)}` : ""}`;
 
   document.getElementById("q").addEventListener("input", e => { query = e.target.value; renderRows(); });
   document.getElementById("f").addEventListener("change", e => { filter = e.target.value; renderRows(); });
@@ -207,7 +235,7 @@ async function showEvent(d, force) {
   if (!cache[d] || force) detailEl.innerHTML = loading(`Loading ${d} km riders…`);
   try { await fetchEvent(d, force); }
   catch (err) { if (current === d) showError(`Could not load the ${d} km event (${err.message}). Try again in a minute.`, () => showEvent(d, true)); return; }
-  await fetchRoute(d);
+  await fetchRoute(d, force);
   if (current !== d) return;
   renderTiles(); renderDetail();
 }
