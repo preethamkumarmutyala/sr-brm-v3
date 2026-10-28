@@ -98,6 +98,13 @@ function rideStatus(r) {
   if (!ev) return { k: "load", t: failed.has(r.id) ? "Couldn't load" : "Checking…" };
   return isClosed(ev) ? { k: "closed", t: "Registration closed" } : { k: "open", t: "Registration open" };
 }
+function progressOf(r) {                  // how much of the time limit is used, and how long is left
+  const [start, end] = rideWindow(r), now = Date.now();
+  const left = Math.max(0, end - now), h = Math.floor(left / 3600e3), m = Math.floor((left % 3600e3) / 60e3);
+  const total = (end - start) / 3600e3;
+  return { pct: Math.min(100, Math.max(0, Math.round(((now - start) / (end - start)) * 100))),
+           text: `${h}h ${pad2(m)}m left of the ${Number.isInteger(total) ? total : total.toFixed(1)}-hour limit` };
+}
 const finishedCount = ev => (ev.riders || []).filter(x => ["finished", "lf"].includes(statusOf(x, true))).length;
 
 // ---------- data ----------
@@ -166,18 +173,25 @@ const isList = v => v === "dashboard" || v === "past" || isSeason(v);
 const thisYear = () => Number(todayIST().slice(0, 4));
 const navKey = v => (isSeason(v) && Number(v.slice(1)) < thisYear() ? "past" : v);     // old seasons all light up "Past seasons"
 const lit = () => navKey(isList(current) || current === "sr" || current === "assistant" ? current : origin);
+const ICONS = {
+  now: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  cur: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/>',
+  next: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  past: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 8v4l3 2"/>'
+};
+const icon = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg>`;
 function renderTiles() {
   const today = todayIST(), f = dateParts(today), cy = thisYear(), on = lit();
   const years = [...new Set(rides.map(r => Number(r.date.slice(0, 4))))].sort((a, b) => a - b);
   const past = years.filter(y => y < cy);
   const n = y => rides.filter(r => r.date.startsWith(String(y))).length;
-  const main = (key, title, sub) => `<button class="mainbtn" data-d="${key}" aria-pressed="${on === key}"><b>${title}</b><span>${sub}</span></button>`;
+  const main = (key, ic, title, sub) => `<button class="mainbtn" data-d="${key}" aria-pressed="${on === key}">${icon(ic)}<div><b>${title}</b><span>${sub}</span></div></button>`;
   const tool = (key, title) => `<button class="subbtn" data-d="${key}" aria-pressed="${on === key}">${title}</button>`;
   tilesEl.innerHTML = `<div class="mainnav">` +
-    main("dashboard", "Now", `${MONTH_NAMES[f.m - 1]} ${f.y} · ${rides.filter(r => r.date.slice(0, 7) === today.slice(0, 7)).length} rides`) +
-    main("y" + cy, "Current season", `${cy} · ${n(cy)} rides`) +
-    main("y" + (cy + 1), "Next season", `${cy + 1} · ${n(cy + 1)} rides`) +
-    (past.length ? main("past", "Past seasons", past.length > 1 ? `${past[0]} to ${past[past.length - 1]}` : `${past[0]}`) : "") +
+    main("dashboard", "now", "Now", `${rides.filter(r => r.date.slice(0, 7) === today.slice(0, 7)).length} rides in ${MONTH_NAMES[f.m - 1]}`) +
+    main("y" + cy, "cur", "Current season", `${n(cy)} rides in ${cy}`) +
+    main("y" + (cy + 1), "next", "Next season", `${n(cy + 1)} rides in ${cy + 1}`) +
+    (past.length ? main("past", "past", "Past seasons", past.length > 1 ? `${past[0]} to ${past[past.length - 1]}` : `${past[0]}`) : "") +
     `</div><div class="subnav">${srIds() ? tool("sr", "One Week SR") : ""}${tool("assistant", "BRM Assistant")}</div>`;
 }
 tilesEl.addEventListener("click", e => { const b = e.target.closest("[data-d]"); if (b) location.hash = b.dataset.d; });
@@ -224,10 +238,11 @@ function renderDetail() {
   const stats = [["Registered", riders.length], ["Fee paid", paid], ["Finished", count("finished") + count("lf")],
                  ["Did not start", count("dns")], ["Did not finish", count("dnf")]]
     .map(([l, n]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join("");
+  const prog = status.k === "ongoing" ? progressOf(ride) : null;
   const say = {
     open: `Registration is open until ${closeText(ev)}. Use “Register on Audax India” to sign up.`,
     closed: `Registration is closed. The ride starts on ${dateStr} at ${fmtTime(ev.startTime) || "the announced time"}.`,
-    ongoing: "This ride is happening now. Results appear in the table below as riders finish.",
+    ongoing: `This ride is happening now, ${prog ? prog.text : "in progress"}. Results appear in the table below as riders finish.`,
     done: "This ride is finished. The results are in the table below."
   }[status.k] || "";
 
@@ -254,7 +269,7 @@ function renderDetail() {
       <div class="info">
         <h2>${esc(name || ev.title || kmLabel(ev.distance))} <span class="chip ${status.k}">${esc(status.t)}</span></h2>
         <p class="rname-line">${esc(ev.title || "")}</p>
-        ${say ? `<div class="banner ${status.k}">${esc(say)}</div>` : ""}
+        ${say ? `<div class="banner ${status.k}">${esc(say)}${prog ? `<div class="rprog"><i style="--p:${prog.pct}%"></i></div>` : ""}</div>` : ""}
         <dl class="facts">
           <dt>Date</dt><dd>${dateStr}</dd>
           <dt>Start time</dt><dd>${esc(fmtTime(ev.startTime) || "Not announced")}</dd>
@@ -336,10 +351,12 @@ const NOTES = {
 };
 function cardHtml(r) {
   const s = rideStatus(r), ev = r.id ? cache[r.id] : null, f = dateParts(r.date), name = cleanName(ev?.rideName);
-  const sub = ev ? `${ev.riderCount} riders` + (s.k === "done" ? ` · ${finishedCount(ev)} finished` : "") : "";
-  const inner = `<div class="rdate"><b>${f.d}</b><span>${f.wd}, ${MON[f.m - 1]}</span></div>
-    <div class="rmain"><b>${esc(kmLabel(r.distance))}</b>${name ? `<span class="rname">${esc(name)}</span>` : ""}${sub ? `<span class="rsub">${sub}</span>` : ""}</div>
-    <span class="chip ${s.k}">${esc(s.t)}</span>`;
+  const sub = ev ? `${ev.riderCount} riders` + (s.k === "done" ? `, ${finishedCount(ev)} finished` : "") : "";
+  const prog = s.k === "ongoing" ? progressOf(r) : null;
+  const inner = `<div class="rdate"><b>${f.d}</b><span>${f.wd}</span><span>${MON[f.m - 1]}</span></div>
+    <div class="rbody"><div class="rtop"><span class="rkm">${esc(kmLabel(r.distance))}</span><span class="chip ${s.k}">${esc(s.t)}</span></div>
+    ${name ? `<span class="rname">${esc(name)}</span>` : ""}${sub ? `<span class="rsub">${sub}</span>` : ""}
+    ${prog ? `<div class="rprog"><i style="--p:${prog.pct}%"></i><small>${esc(prog.text)}</small></div>` : ""}</div>`;
   return r.id
     ? `<a class="ride" data-ride="${r.id}" href="#e${r.id}">${inner}</a>`
     : `<button type="button" class="ride off" data-toggle data-ride="u-${r.date}-${r.distance}">${inner}<span class="rnote">${esc(NOTES[s.k] || "")}</span></button>`;
