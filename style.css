@@ -178,3 +178,45 @@ a.ride:hover { border-color: var(--brand); text-decoration: none; }
 .subbtn[aria-pressed="true"] { background: var(--brand); color: #fff; }
 .mainbtn:focus-visible, .subbtn:focus-visible { outline: 3px solid #f4a58a; outline-offset: 2px; }
 .chip.ongoing { background: #dbeafe; color: #1e4fa3; }
+
+/* plain-language ride page: back link, banner, collapsible sections */
+.back { display: inline-block; margin-bottom: .75rem; font-weight: 500; }
+.banner { margin: 0 0 .9rem; padding: .65rem .9rem; border-radius: 4px; border-left: 4px solid var(--line); background: #fff; }
+.banner.open { border-color: var(--ok); background: #eef8f1; }
+.banner.closed { border-color: var(--bad); background: #fdf0ee; }
+.banner.ongoing { border-color: #1e4fa3; background: #eaf2fe; }
+.banner.done { border-color: var(--muted); background: #f3f4f6; }
+details.sect { background: #fff; border: 1px solid var(--line); border-radius: 4px; margin-top: .8rem; }
+details.sect > summary { cursor: pointer; padding: .7rem .9rem; font-weight: 500; font-size: 1.05rem; list-style: none; display: flex; align-items: center; gap: .5rem; }
+details.sect > summary::-webkit-details-marker { display: none; }
+details.sect > summary::before { content: "\25B8"; color: var(--brand); }
+details.sect[open] > summary::before { content: "\25BE"; }
+details.sect > :not(summary) { margin: 0 .9rem .9rem; }
+.count { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0 .55rem; font-size: .8rem; color: var(--muted); font-weight: 400; }
+
+/* season page: tap-to-filter boxes, month strip, distance chips */
+.fchips { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8.5rem), 1fr)); gap: .6rem; margin: .8rem 0; }
+.fchip { text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 4px; padding: .5rem .75rem; font: inherit; color: inherit; cursor: pointer; }
+.fchip b { display: block; font-size: 1.4rem; font-weight: 500; }
+.fchip span { color: var(--muted); font-size: .85rem; }
+.fchip:hover, .mchip:not(:disabled):hover, .dchip:hover, .seasonlink:hover { border-color: var(--brand); }
+.fchip[aria-pressed="true"], .mchip[aria-pressed="true"], .dchip[aria-pressed="true"] { background: var(--brand); border-color: var(--brand); color: #fff; }
+.fchip[aria-pressed="true"] span, .mchip[aria-pressed="true"] small { color: #fff; }
+.flabel { margin: .8rem 0 .3rem; font-size: .85rem; color: var(--muted); }
+.months { display: flex; gap: .4rem; overflow-x: auto; padding-bottom: .3rem; }
+.mchip { flex: 0 0 auto; min-width: 3.4rem; background: #fff; border: 1px solid var(--line); border-radius: 4px; padding: .35rem .5rem; font: inherit; color: inherit; cursor: pointer; text-align: center; }
+.mchip small { display: block; color: var(--muted); font-size: .75rem; min-height: 1em; }
+.mchip:disabled { opacity: .45; cursor: default; }
+.dchips { display: flex; flex-wrap: wrap; gap: .4rem; }
+.dchip { background: #fff; border: 1px solid var(--line); border-radius: 4px; padding: .35rem .9rem; font: inherit; color: inherit; cursor: pointer; }
+.linkbtn { background: none; border: 0; color: var(--brand); font: inherit; text-decoration: underline; cursor: pointer; padding: 0; }
+.seasons { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: .65rem; }
+.seasonlink { background: #fff; border: 1px solid var(--line); border-radius: 4px; padding: .8rem 1rem; color: inherit; text-decoration: none; }
+.seasonlink:hover { text-decoration: none; }
+.seasonlink b { display: block; font-size: 1.3rem; font-weight: 500; }
+.seasonlink span { color: var(--muted); font-size: .9rem; }
+
+/* rides with no Audax page are tap-to-read cards */
+button.ride { width: 100%; text-align: left; font: inherit; cursor: pointer; }
+.rnote { grid-column: 1 / -1; display: none; padding-top: .45rem; border-top: 1px dashed var(--line); color: var(--muted); font-size: .9rem; }
+.ride.open .rnote { display: block; }
