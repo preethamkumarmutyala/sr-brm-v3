@@ -1,4 +1,4 @@
-// SR BRM dashboard: this week, upcoming and past rides, riders, controls, cue sheet, One Week SR, BRM Assistant
+// SR BRM dashboard: Now, current / next / past seasons, ride pages, One Week SR, BRM Assistant
 const API_BASE = "https://sr-brm-api.secunderabadrandonneurs.workers.dev";
 const AUDAX = "https://www.audaxindia.in";
 const LEGACY = { "10047": "600", "10048": "200", "10049": "300", "10050": "400" };   // old backup cue-sheet files: data/<distance>.json
@@ -16,6 +16,8 @@ const detailEl = document.getElementById("detail");
 const cache = {}, routeCache = {}, failed = new Set(), queued = new Set();
 let rides = [], calendarNote = "";
 let current = null, origin = null, query = "", filter = "all";   // origin = the list you came from (for the back button)
+let flt = { season: "", status: "all", dist: "all", month: "all" };   // filters on a season page
+const secOpen = { riders: true, controls: false, cue: false, map: false };   // which sections of a ride page are open
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -158,18 +160,24 @@ function srRiders() {                   // riders registered for all four
   return Object.values(map).filter(r => r.rides.size === SR_DISTANCES.length);
 }
 
-// ---------- navigation ----------
-const isList = v => v === "dashboard" || /^y\d{4}$/.test(v || "");
-const lit = () => (isList(current) || current === "sr" || current === "assistant" ? current : origin);   // which main button is lit
+// ---------- navigation: Now, Current season, Next season, Past seasons ----------
+const isSeason = v => /^y\d{4}$/.test(v || "");
+const isList = v => v === "dashboard" || v === "past" || isSeason(v);
+const thisYear = () => Number(todayIST().slice(0, 4));
+const navKey = v => (isSeason(v) && Number(v.slice(1)) < thisYear() ? "past" : v);     // old seasons all light up "Past seasons"
+const lit = () => navKey(isList(current) || current === "sr" || current === "assistant" ? current : origin);
 function renderTiles() {
-  const today = todayIST(), month = today.slice(0, 7), f = dateParts(today);
-  const years = [...new Set(rides.map(r => r.date.slice(0, 4)))].sort();
-  const on = lit();
+  const today = todayIST(), f = dateParts(today), cy = thisYear(), on = lit();
+  const years = [...new Set(rides.map(r => Number(r.date.slice(0, 4))))].sort((a, b) => a - b);
+  const past = years.filter(y => y < cy);
+  const n = y => rides.filter(r => r.date.startsWith(String(y))).length;
   const main = (key, title, sub) => `<button class="mainbtn" data-d="${key}" aria-pressed="${on === key}"><b>${title}</b><span>${sub}</span></button>`;
   const tool = (key, title) => `<button class="subbtn" data-d="${key}" aria-pressed="${on === key}">${title}</button>`;
   tilesEl.innerHTML = `<div class="mainnav">` +
-    main("dashboard", "Dashboard", `${MONTH_NAMES[f.m - 1]} ${f.y} · ${rides.filter(r => r.date.slice(0, 7) === month).length} rides`) +
-    years.map(y => main("y" + y, `${y} BRMs`, `${rides.filter(r => r.date.startsWith(y)).length} rides`)).join("") +
+    main("dashboard", "Now", `${MONTH_NAMES[f.m - 1]} ${f.y} · ${rides.filter(r => r.date.slice(0, 7) === today.slice(0, 7)).length} rides`) +
+    main("y" + cy, "Current season", `${cy} · ${n(cy)} rides`) +
+    main("y" + (cy + 1), "Next season", `${cy + 1} · ${n(cy + 1)} rides`) +
+    (past.length ? main("past", "Past seasons", past.length > 1 ? `${past[0]} to ${past[past.length - 1]}` : `${past[0]}`) : "") +
     `</div><div class="subnav">${srIds() ? tool("sr", "One Week SR") : ""}${tool("assistant", "BRM Assistant")}</div>`;
 }
 tilesEl.addEventListener("click", e => { const b = e.target.closest("[data-d]"); if (b) location.hash = b.dataset.d; });
@@ -196,13 +204,19 @@ function startMap(ev) {                  // the usual start has an exact pin; ot
   return { link: `https://www.google.com/maps/search/?api=1&query=${q}`, embed: `https://www.google.com/maps?q=${q}&output=embed` };
 }
 
+const cleanName = n => (n && n.length <= 80 ? n : "");        // ignore a ride name that is clearly page text
+const sec = (key, title, count, body) => `<details class="sect" data-sec="${key}" ${secOpen[key] ? "open" : ""}>
+  <summary>${title}${count != null ? ` <span class="count">${count}</span>` : ""}</summary>${body}</details>`;
+
 function renderDetail() {
   const ev = cache[current]; if (!ev) return;
   const route = routeCache[current];
   const ride = rides.find(r => r.id === current) || { id: current, date: ev.date || todayIST(), distance: ev.distance };
   const status = rideStatus(ride);
   const closed = isClosed(ev), over = closed || status.k === "done" || status.k === "ongoing";
-  const map = startMap(ev);
+  const map = startMap(ev), name = cleanName(ev.rideName);
+  const f = dateParts(ev.date || ride.date);
+  const dateStr = `${f.wd} ${f.d} ${MON[f.m - 1]} ${f.y}`;
   const riders = ev.riders || [];
   const started = hasStarted(ev);
   const count = k => riders.filter(r => statusOf(r, started) === k).length;
@@ -210,6 +224,12 @@ function renderDetail() {
   const stats = [["Registered", riders.length], ["Fee paid", paid], ["Finished", count("finished") + count("lf")],
                  ["Did not start", count("dns")], ["Did not finish", count("dnf")]]
     .map(([l, n]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join("");
+  const say = {
+    open: `Registration is open until ${closeText(ev)}. Use “Register on Audax India” to sign up.`,
+    closed: `Registration is closed. The ride starts on ${dateStr} at ${fmtTime(ev.startTime) || "the announced time"}.`,
+    ongoing: "This ride is happening now. Results appear in the table below as riders finish.",
+    done: "This ride is finished. The results are in the table below."
+  }[status.k] || "";
 
   // Controls and cue sheet come from the Audax route card: Location, Type, then distances and times
   const ctl = route?.controls || [];
@@ -226,45 +246,47 @@ function renderDetail() {
     return `<tr${c.control ? ' class="ctl"' : ""}><td>${esc(c.location)}</td>${cueType ? `<td>${esc(c.type)}</td>` : ""}<td class="num">${esc(km2(partial))}</td><td class="num">${esc(km2(c.km))}</td></tr>`;
   }).join("");
   const cueHeads = ["Location", ...(cueType ? ["Type"] : []), ["Partial km", "num"], ["Total km", "num"]];
+  const back = origin && origin !== "dashboard" ? `${origin.slice(1)} season` : "Now";
 
   detailEl.innerHTML = `
+    <a class="back" href="#${origin || "dashboard"}">&larr; Back to ${back}</a>
     <div class="head">
       <div class="info">
-        <h2>${esc(ev.title || kmLabel(ev.distance))} <span class="chip ${status.k}">${esc(status.t)}</span></h2>
-        ${ev.rideName ? `<p class="rname-line">${esc(ev.rideName)}</p>` : ""}
+        <h2>${esc(name || ev.title || kmLabel(ev.distance))} <span class="chip ${status.k}">${esc(status.t)}</span></h2>
+        <p class="rname-line">${esc(ev.title || "")}</p>
+        ${say ? `<div class="banner ${status.k}">${esc(say)}</div>` : ""}
         <dl class="facts">
-          <dt>Start</dt><dd>${esc(fmtTime(ev.startTime) || "Not announced")}</dd>
-          <dt>Starting point</dt><dd>${esc(ev.startLocation || "Not announced")}
-            <a href="${map.link}" target="_blank" rel="noopener">Open in Google Maps</a></dd>
-          <dt>${closed ? "Registration closed" : "Registration closes"}</dt><dd>${esc(closeText(ev) || "Not announced")} ${closed ? '<span class="tag dns">Closed</span>' : ""}</dd>
+          <dt>Date</dt><dd>${dateStr}</dd>
+          <dt>Start time</dt><dd>${esc(fmtTime(ev.startTime) || "Not announced")}</dd>
+          <dt>Starting point</dt><dd>${esc(ev.startLocation || "Not announced")} <a href="${map.link}" target="_blank" rel="noopener">Open in Google Maps</a></dd>
+          <dt>${closed ? "Registration closed" : "Registration closes"}</dt><dd>${esc(closeText(ev) || "Not announced")}</dd>
           ${route?.info?.distance ? `<dt>Distance</dt><dd>${esc(km2(route.info.distance))} km${route.info.brevet ? ` (${esc(route.info.brevet)} km brevet)` : ""}</dd>` : ""}
         </dl>
-        <iframe class="map" title="Start location map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="${map.embed}"></iframe>
       </div>
       <div class="actions">
         ${ev.routeMap ? `<a class="btn" href="${esc(ev.routeMap)}" target="_blank" rel="noopener">View route</a>` : ""}
         ${over ? `<span class="btn off" aria-disabled="true">${status.k === "done" ? "Ride completed" : status.k === "ongoing" ? "Ride in progress" : "Registration closed"}</span>`
                : `<a class="btn alt" href="${AUDAX}/event-e-${esc(current)}" target="_blank" rel="noopener">Register on Audax India</a>`}
         <a class="btn alt" href="${AUDAX}/member-login.php" target="_blank" rel="noopener">Rider login</a>
-        <a class="btn alt" href="#${origin || "dashboard"}">&larr; ${origin && origin !== "dashboard" ? origin.slice(1) + " BRMs" : "Dashboard"}</a>
       </div>
     </div>
-    <div class="stats">${stats}</div>
-    <h3 class="sec">Fellow riders</h3>
-    <div class="tools">
-      <input id="q" type="search" placeholder="Search name, AIR number or club" aria-label="Search riders" value="${esc(query)}">
-      <select id="f" aria-label="Filter by status">
-        ${["all", "registered", "finished", "lf", "ytc", "dns", "dnf"].map(k =>
-          `<option value="${k}" ${k === filter ? "selected" : ""}>${k === "all" ? "All riders" : LABELS[k]}</option>`).join("")}
-      </select>
-      <span class="meta" id="meta"></span>
-      <button class="btn alt" id="refresh" type="button">Refresh</button>
-    </div>
-    <div class="scroll"><table>
-      <thead><tr><th>#</th><th>Rider</th><th>AIR no.</th><th>Club</th><th>Fee paid</th><th>Medal</th><th>Result</th><th>Status</th></tr></thead>
-      <tbody id="rows"></tbody></table></div>
-    ${controls ? `<h3 class="sec">Controls</h3>${table(controlHeads, controls)}` : ""}
-    ${cues ? `<h3 class="sec">Cue sheet</h3>${table(cueHeads, cues)}` : (route === null ? '<p class="note">The cue sheet is not available on Audax yet.</p>' : "")}`;
+    ${sec("riders", "Riders and results", riders.length, `
+      <div class="stats">${stats}</div>
+      <div class="tools">
+        <input id="q" type="search" placeholder="Search name, AIR number or club" aria-label="Search riders" value="${esc(query)}">
+        <select id="f" aria-label="Filter by status">
+          ${["all", "registered", "finished", "lf", "ytc", "dns", "dnf"].map(k =>
+            `<option value="${k}" ${k === filter ? "selected" : ""}>${k === "all" ? "All riders" : LABELS[k]}</option>`).join("")}
+        </select>
+        <span class="meta" id="meta"></span>
+        <button class="btn alt" id="refresh" type="button">Refresh</button>
+      </div>
+      <div class="scroll"><table>
+        <thead><tr><th>#</th><th>Rider</th><th>AIR no.</th><th>Club</th><th>Fee paid</th><th>Medal</th><th>Result</th><th>Status</th></tr></thead>
+        <tbody id="rows"></tbody></table></div>`)}
+    ${controls ? sec("controls", "Controls (check-points)", ctl.length, table(controlHeads, controls)) : ""}
+    ${cues ? sec("cue", "Cue sheet (turn by turn)", cue.length, table(cueHeads, cues)) : (route === null ? '<p class="note">Controls and cue sheet are not on Audax yet.</p>' : "")}
+    ${sec("map", "Start location map", null, `<iframe class="map" title="Start location map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="${map.embed}"></iframe>`)}`;
 
   document.getElementById("q").addEventListener("input", e => { query = e.target.value; renderRows(); });
   document.getElementById("f").addEventListener("change", e => { filter = e.target.value; renderRows(); });
@@ -307,15 +329,20 @@ async function showEvent(id, force) {
   renderTiles(); renderDetail();
 }
 
-// ---------- upcoming and past lists ----------
+// ---------- ride cards, Now page, season pages ----------
+const NOTES = {
+  soon: "Registration has not opened yet. This ride will switch to open by itself as soon as its page is created on Audax.",
+  cancel: "This ride was cancelled."
+};
 function cardHtml(r) {
-  const s = rideStatus(r), ev = r.id ? cache[r.id] : null, f = dateParts(r.date);
+  const s = rideStatus(r), ev = r.id ? cache[r.id] : null, f = dateParts(r.date), name = cleanName(ev?.rideName);
   const sub = ev ? `${ev.riderCount} riders` + (s.k === "done" ? ` · ${finishedCount(ev)} finished` : "") : "";
   const inner = `<div class="rdate"><b>${f.d}</b><span>${f.wd}, ${MON[f.m - 1]}</span></div>
-    <div class="rmain"><b>${esc(kmLabel(r.distance))}</b>${ev?.rideName ? `<span class="rname">${esc(ev.rideName)}</span>` : ""}${sub ? `<span class="rsub">${sub}</span>` : ""}</div>
+    <div class="rmain"><b>${esc(kmLabel(r.distance))}</b>${name ? `<span class="rname">${esc(name)}</span>` : ""}${sub ? `<span class="rsub">${sub}</span>` : ""}</div>
     <span class="chip ${s.k}">${esc(s.t)}</span>`;
-  return r.id ? `<a class="ride" data-ride="${r.id}" href="#e${r.id}">${inner}</a>`
-              : `<div class="ride off" data-ride="u-${r.date}-${r.distance}">${inner}</div>`;
+  return r.id
+    ? `<a class="ride" data-ride="${r.id}" href="#e${r.id}">${inner}</a>`
+    : `<button type="button" class="ride off" data-toggle data-ride="u-${r.date}-${r.distance}">${inner}<span class="rnote">${esc(NOTES[s.k] || "")}</span></button>`;
 }
 function updateCard(id) {
   const r = rides.find(x => x.id === id), el = document.querySelector(`[data-ride="${id}"]`);
@@ -338,7 +365,7 @@ async function loadDetails(ids) {         // fills in names, rider counts and st
   };
   await Promise.all([lane(), lane(), lane()]);
 }
-function monthGroups(list) {              // cards grouped under month headings (list is already in date order)
+function monthGroups(list) {              // cards under month headings (list is in date order)
   let html = "", key = "";
   for (const r of list) {
     const k = r.date.slice(0, 7);
@@ -352,31 +379,87 @@ function monthGroups(list) {              // cards grouped under month headings 
   }
   return key ? html + "</div>" : html;
 }
-function renderDashboard() {              // this month's rides; next month's appear on the 1st
-  const today = todayIST(), month = today.slice(0, 7), f = dateParts(today);
-  const list = rides.filter(r => r.date.slice(0, 7) === month);
-  let html = `<h2>Dashboard · ${MONTH_NAMES[f.m - 1]} ${f.y}</h2>
-    <p class="note">This month's rides. Completed rides stay here until the month ends, and next month's rides appear on the 1st.</p>`;
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+// NOW: this month's rides sorted by what matters today
+function renderDashboard() {
+  const today = todayIST(), f = dateParts(today);
+  const list = rides.filter(r => r.date.slice(0, 7) === today.slice(0, 7));
+  const k = r => rideStatus(r).k;
+  const groups = [
+    ["Happening now", list.filter(r => k(r) === "ongoing")],
+    ["Coming up this month", list.filter(r => ["open", "closed", "load", "soon"].includes(k(r)))],
+    ["Completed this month", list.filter(r => k(r) === "done")],
+    ["Cancelled", list.filter(r => k(r) === "cancel")]
+  ];
+  let html = `<h2>Now</h2><p class="note">Today is ${f.wd} ${f.d} ${MON[f.m - 1]} ${f.y}. ` +
+    (list.length ? groups.filter(g => g[1].length).map(g => `${g[1].length} ${g[0].toLowerCase()}`).join(", ") + "." : "There are no rides this month.") + `</p>`;
   if (calendarNote) html += `<p class="note error">${esc(calendarNote)}</p>`;
-  html += list.length ? `<div class="rides">${list.map(cardHtml).join("")}</div>` : `<p class="note">No rides this month.</p>`;
-  const next = rides.find(r => r.date.slice(0, 7) > month);
-  if (next) { const n = dateParts(next.date); html += `<p class="note">Next on the calendar: ${n.wd} ${n.d} ${MON[n.m - 1]} ${n.y}, ${esc(kmLabel(next.distance))} (${esc(rideStatus(next).t.toLowerCase())}).</p>`; }
+  for (const [title, items] of groups) if (items.length) html += `<h3 class="sec">${title}</h3><div class="rides">${items.map(cardHtml).join("")}</div>`;
+  const next = rides.find(r => r.date.slice(0, 7) > today.slice(0, 7));
+  if (next) { const n = dateParts(next.date); html += `<p class="note">After this month: ${n.wd} ${n.d} ${MON[n.m - 1]} ${n.y}, ${esc(kmLabel(next.distance))} (${esc(rideStatus(next).t.toLowerCase())}).</p>`; }
   detailEl.innerHTML = html;
   loadDetails(list.filter(r => r.id).map(r => r.id));
 }
-function renderYear(year) {               // every ride of one year, January to December
-  const list = rides.filter(r => r.date.startsWith(year));
-  const st = list.map(r => rideStatus(r).k);
-  const n = k => st.filter(x => x === k).length;
-  let html = `<h2>${year} BRMs</h2>`;
-  if (calendarNote) html += `<p class="note error">${esc(calendarNote)}</p>`;
-  html += list.length
-    ? `<p class="note">${list.length} rides: ${n("done")} completed, ${n("ongoing")} ongoing, ${n("open") + n("closed") + n("load")} with registration on Audax, ${n("soon")} not opened yet, ${n("cancel")} cancelled.</p>` + monthGroups(list)
-    : `<p class="note">No rides on the calendar for ${year}.</p>`;
-  detailEl.innerHTML = html;
+
+// SEASON: every ride of one year, with tap-to-filter summary, month strip and distance chips
+const groupOf = r => ({ done: "done", cancel: "cancel", soon: "soon" }[rideStatus(r).k] || "live");
+const distOf = r => (r.distance === "Fleche" ? "Fleche" : Number(r.distance) >= 1000 ? "1000+" : r.distance);
+const GROUPS = [["all", "All rides"], ["done", "Completed"], ["live", "On now / coming up"], ["soon", "Not opened yet"], ["cancel", "Cancelled"]];
+function renderSeason(year) {
+  if (flt.season !== year) flt = { season: year, status: "all", dist: "all", month: "all" };
+  const cy = thisYear(), y = Number(year);
+  const label = y === cy ? "Current season" : y > cy ? "Next season" : "Past season";
+  const about = y === cy ? "Everything planned this year. Tap a ride for details, or tap the boxes, months and distances below to narrow the list."
+    : y > cy ? "The plan for next season. Rides show “Registration not opened” until they are created on Audax; they open here by themselves."
+    : "A finished season. Tap a ride to see its riders and results.";
+  const all = rides.filter(r => r.date.startsWith(year));
+  const list = all.filter(r => (flt.status === "all" || groupOf(r) === flt.status) && (flt.dist === "all" || distOf(r) === flt.dist) &&
+                               (flt.month === "all" || r.date.slice(5, 7) === flt.month));
+  const dists = ["200", "300", "400", "600", "1000+", "Fleche"].filter(d => all.some(r => distOf(r) === d));
+  const active = flt.status !== "all" || flt.dist !== "all" || flt.month !== "all";
+  const chipSt = ([g, t]) => `<button type="button" class="fchip" data-st="${g}" aria-pressed="${flt.status === g}"><b>${g === "all" ? all.length : all.filter(r => groupOf(r) === g).length}</b><span>${t}</span></button>`;
+  const months = MON.map((m, i) => { const mm = String(i + 1).padStart(2, "0"), c = all.filter(r => r.date.slice(5, 7) === mm).length;
+    return `<button type="button" class="mchip" data-month="${mm}" aria-pressed="${flt.month === mm}" ${c ? "" : "disabled"}>${m}<small>${c || ""}</small></button>`; }).join("");
+
+  detailEl.innerHTML = `<h2>${year} season <span class="chip">${label}</span></h2><p class="note">${about}</p>
+    ${calendarNote ? `<p class="note error">${esc(calendarNote)}</p>` : ""}
+    <div class="fchips">${GROUPS.map(chipSt).join("")}</div>
+    <div class="flabel">Month</div><div class="months">${months}</div>
+    ${dists.length > 1 ? `<div class="flabel">Distance</div><div class="dchips">${dists.map(d =>
+      `<button type="button" class="dchip" data-dist="${d}" aria-pressed="${flt.dist === d}">${d === "Fleche" ? "Fleche" : d + " km"}</button>`).join("")}</div>` : ""}
+    ${active ? `<p class="note">Showing ${plural(list.length, "ride", "rides")} of ${all.length}. <button type="button" class="linkbtn" data-clear>Show all rides</button></p>` : ""}
+    ${list.length ? monthGroups(list) : `<p class="note">No rides match these choices. <button type="button" class="linkbtn" data-clear>Show all rides</button></p>`}`;
   loadDetails(list.filter(r => r.id).map(r => r.id));
 }
-const renderCurrentList = () => (current === "dashboard" ? renderDashboard() : renderYear(current.slice(1)));
+
+// PAST SEASONS: pick a year
+function renderPast() {
+  const cy = thisYear();
+  const years = [...new Set(rides.map(r => Number(r.date.slice(0, 4))))].filter(y => y < cy).sort((a, b) => b - a);
+  detailEl.innerHTML = `<h2>Past seasons</h2><p class="note">Seasons before ${cy}. Pick a season to see all of its rides.</p>` +
+    (years.length ? `<div class="seasons">${years.map(y => {
+      const l = rides.filter(r => r.date.startsWith(String(y))), s = l.map(r => rideStatus(r).k);
+      const d = s.filter(x => x === "done").length, c = s.filter(x => x === "cancel").length;
+      return `<a class="seasonlink" href="#y${y}"><b>${y} season</b><span>${plural(l.length, "ride", "rides")} · ${d} completed${c ? ` · ${c} cancelled` : ""}</span></a>`;
+    }).join("")}</div>` : `<p class="note">No past seasons on the calendar yet.</p>`);
+}
+const renderCurrentList = () => (current === "dashboard" ? renderDashboard() : current === "past" ? renderPast() : renderSeason(current.slice(1)));
+
+// taps inside the page: filters, "not opened / cancelled" cards, remembered open sections
+detailEl.addEventListener("click", e => {
+  const t = e.target.closest("[data-st],[data-dist],[data-month],[data-clear],[data-toggle]");
+  if (!t) return;
+  if (t.hasAttribute("data-toggle")) { t.classList.toggle("open"); return; }
+  if (!isSeason(current)) return;
+  const flip = (key, v) => { flt[key] = flt[key] === v ? "all" : v; };
+  if (t.dataset.clear !== undefined) flt = { season: flt.season, status: "all", dist: "all", month: "all" };
+  else if (t.dataset.st) flip("status", t.dataset.st);
+  else if (t.dataset.dist) flip("dist", t.dataset.dist);
+  else if (t.dataset.month) flip("month", t.dataset.month);
+  renderSeason(current.slice(1));
+});
+detailEl.addEventListener("toggle", e => { const k = e.target.dataset?.sec; if (k) secOpen[k] = e.target.open; }, true);
 
 // ---------- One Week SR ----------
 async function showSR(force) {
@@ -453,15 +536,15 @@ function select() {
   const byDistance = /^(200|300|400|600)$/.test(h) ? wk.find(r => r.distance === h) : null;   // old links like #600
   if (/^e\d+$/.test(h)) current = h.slice(1);
   else if (byDistance) current = byDistance.id;
-  else if (h === "past") current = "y" + todayIST().slice(0, 4);                              // old links
   else if (isList(h) || h === "sr" || h === "assistant") current = h;
   else current = "dashboard";
-  if (isList(current)) origin = current;
-  else if (!origin && !["sr", "assistant"].includes(current)) {                             // opened a ride link directly
+  if (current === "dashboard" || isSeason(current)) origin = current;
+  else if (!origin && !["sr", "assistant", "past"].includes(current)) {                      // opened a ride link directly
     const r = rides.find(x => x.id === current);
     origin = r ? (r.date.slice(0, 7) === todayIST().slice(0, 7) ? "dashboard" : "y" + r.date.slice(0, 4)) : "dashboard";
   }
   renderTiles();
+  window.scrollTo?.(0, 0);
   if (current === "sr") showSR();
   else if (current === "assistant") showAssistant();
   else if (isList(current)) renderCurrentList();
