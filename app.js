@@ -17,7 +17,7 @@ const cache = {}, routeCache = {}, failed = new Set(), queued = new Set();
 let rides = [], calendarNote = "";
 let current = null, origin = null, query = "", filter = "all";   // origin = the list you came from (for the back button)
 let flt = { season: "", status: "all", dist: "all", month: "all" };   // filters on a season page
-const secOpen = { riders: true, controls: false, cue: false, map: false };   // which sections of a ride page are open
+const secOpen = { riders: true, controls: false, cue: false };   // which sections of a ride page are open
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -270,6 +270,7 @@ function renderDetail() {
         <h2>${esc(name || ev.title || kmLabel(ev.distance))} <span class="chip ${status.k}">${esc(status.t)}</span></h2>
         <p class="rname-line">${esc(ev.title || "")}</p>
         ${say ? `<div class="banner ${status.k}">${esc(say)}${prog ? `<div class="rprog"><i style="--p:${prog.pct}%"></i></div>` : ""}</div>` : ""}
+        <div class="detailgrid">
         <dl class="facts">
           <dt>Date</dt><dd>${dateStr}</dd>
           <dt>Start time</dt><dd>${esc(fmtTime(ev.startTime) || "Not announced")}</dd>
@@ -277,6 +278,8 @@ function renderDetail() {
           <dt>${closed ? "Registration closed" : "Registration closes"}</dt><dd>${esc(closeText(ev) || "Not announced")}</dd>
           ${route?.info?.distance ? `<dt>Distance</dt><dd>${esc(km2(route.info.distance))} km${route.info.brevet ? ` (${esc(route.info.brevet)} km brevet)` : ""}</dd>` : ""}
         </dl>
+        <iframe class="map" title="Start location map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="${map.embed}"></iframe>
+        </div>
       </div>
       <div class="actions">
         ${ev.routeMap ? `<a class="btn" href="${esc(ev.routeMap)}" target="_blank" rel="noopener">View route</a>` : ""}
@@ -300,8 +303,7 @@ function renderDetail() {
         <thead><tr><th>#</th><th>Rider</th><th>AIR no.</th><th>Club</th><th>Fee paid</th><th>Medal</th><th>Result</th><th>Status</th></tr></thead>
         <tbody id="rows"></tbody></table></div>`)}
     ${controls ? sec("controls", "Controls (check-points)", ctl.length, table(controlHeads, controls)) : ""}
-    ${cues ? sec("cue", "Cue sheet (turn by turn)", cue.length, table(cueHeads, cues)) : (route === null ? '<p class="note">Controls and cue sheet are not on Audax yet.</p>' : "")}
-    ${sec("map", "Start location map", null, `<iframe class="map" title="Start location map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="${map.embed}"></iframe>`)}`;
+    ${cues ? sec("cue", "Cue sheet (turn by turn)", cue.length, table(cueHeads, cues)) : (route === null ? '<p class="note">Controls and cue sheet are not on Audax yet.</p>' : "")}`;
 
   document.getElementById("q").addEventListener("input", e => { query = e.target.value; renderRows(); });
   document.getElementById("f").addEventListener("change", e => { filter = e.target.value; renderRows(); });
