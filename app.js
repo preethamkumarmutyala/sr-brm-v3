@@ -167,12 +167,67 @@ function srRiders() {                   // riders registered for all four
   return Object.values(map).filter(r => r.rides.size === SR_DISTANCES.length);
 }
 
+// ---------- team sign-in helpers and the public control board ----------
+const TEAM_KEY = "srTeam";
+const getTeam = () => { try { const t = JSON.parse(localStorage.getItem(TEAM_KEY) || "null"); return t && t.exp > Date.now() ? t : null; } catch (_) { return null; } };
+async function api(path, body) {          // talks to the Worker; sends the team token when someone is signed in
+  const t = getTeam();
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: body ? "POST" : "GET",
+    headers: { ...(t ? { Authorization: "Bearer " + t.token } : {}), ...(body ? { "Content-Type": "application/json" } : {}) },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const j = await res.json().catch(() => ({}));
+  if (res.status === 401 && t && path.startsWith("/team")) localStorage.removeItem(TEAM_KEY);
+  if (!res.ok) throw new Error(j.error || "Server returned " + res.status);
+  return j;
+}
+const crossCache = {};
+async function fetchCrossings(id, force) {
+  if (!force && crossCache[id]) return crossCache[id];
+  try { crossCache[id] = (await api(`/crossings/${id}`)).crossings || []; } catch (_) { crossCache[id] = crossCache[id] || []; }
+  return crossCache[id];
+}
+const sameAir = (a, b) => String(a).trim().replace(/^0+/, "") === String(b).trim().replace(/^0+/, "");
+const cno = (c, i) => Number(c.no ?? i + 1);                       // a control's number (its position in the list if Audax gives none)
+const clockOf = (ts, rideDate) => {       // "08:41 AM", or "D2 03:10 AM" after the first day
+  const d = new Date(ts + 5.5 * 3600e3), day = Math.round((Date.parse(d.toISOString().slice(0, 10)) - Date.parse(rideDate)) / 864e5) + 1;
+  return (day > 1 ? `D${day} ` : "") + fmtTime(d.toISOString().slice(11, 16));
+};
+const closeMs = (c, date) => { const m = (c.close || "").match(/D(\d)\s+(\d{1,2}):(\d{2})/); return m ? Date.parse(`${date}T${pad2(m[2])}:${m[3]}:00+05:30`) + (Number(m[1]) - 1) * 864e5 : null; };
+
+function boardHtml(ev, route, cr, rideDate) {       // who has reached which control (times recorded by the team)
+  const ctl = route?.controls || [];
+  if (!cr.length) return `<p class="note">No control times have been recorded yet. Our team notes the time each rider reaches a control, and it shows up here.</p>`;
+  const idx = no => ctl.findIndex((c, k) => cno(c, k) === Number(no));
+  const kmOf = no => (idx(no) < 0 ? NaN : Number(ctl[idx(no)].km));
+  const ctlName = no => (idx(no) < 0 ? `Control ${no}` : ctl[idx(no)].location);
+  const nameOf = air => (ev.riders || []).find(r => sameAir(r.air, air))?.name || `AIR ${air}`;
+  const total = Number(route?.info?.distance) || Number(ctl[ctl.length - 1]?.km) || 0;
+  const byAir = {};
+  for (const x of cr) (byAir[x.air] ||= []).push(x);
+  const rows = Object.entries(byAir).map(([air, list]) => {
+    const last = list.reduce((a, b) => ((kmOf(b.no) || 0) > (kmOf(a.no) || 0) ? b : a));
+    return { air, last, km: kmOf(last.no) };
+  }).sort((a, b) => (b.km || 0) - (a.km || 0) || a.last.ts - b.last.ts);
+  const body = rows.map(r => `<tr><td>${esc(nameOf(r.air))}</td><td>${esc(ctlName(r.last.no))}</td>
+    <td class="num">${isFinite(r.km) ? esc(km2(r.km)) + " km" : ""}${total && isFinite(r.km) ? `<div class="kmbar"><i style="--p:${Math.min(100, Math.round((r.km / total) * 100))}%"></i></div>` : ""}</td>
+    <td class="num">${esc(clockOf(r.last.ts, rideDate))}</td></tr>`).join("");
+  const each = ctl.map((c, i) => {
+    const here = cr.filter(x => Number(x.no) === cno(c, i)).sort((a, b) => a.ts - b.ts);
+    return here.length ? `<div class="ctlrow"><b>${esc(km2(c.km))} km, ${esc(c.location)}</b><span>${here.map(x => `${esc(clockOf(x.ts, rideDate))} ${esc(nameOf(x.air))}`).join("<br>")}</span></div>` : "";
+  }).join("");
+  return `<p class="note">Updated by the organising team at the controls. Km done is the distance of the last control a rider has crossed.</p>
+    ${table(["Rider", "Last control", ["Km done", "num"], ["Time", "num"]], body)}
+    ${each ? `<details class="inner"><summary>Times at each control</summary>${each}</details>` : ""}`;
+}
+
 // ---------- navigation: Now, Current season, Next season, Past seasons ----------
 const isSeason = v => /^y\d{4}$/.test(v || "");
 const isList = v => v === "dashboard" || v === "past" || isSeason(v);
 const thisYear = () => Number(todayIST().slice(0, 4));
 const navKey = v => (isSeason(v) && Number(v.slice(1)) < thisYear() ? "past" : v);     // old seasons all light up "Past seasons"
-const lit = () => navKey(isList(current) || current === "sr" || current === "assistant" ? current : origin);
+const lit = () => (current === "team" ? "" : navKey(isList(current) || current === "sr" || current === "assistant" ? current : origin));
 const ICONS = {
   now: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   cur: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/>',
@@ -188,9 +243,9 @@ function renderTiles() {
   const main = (key, ic, title, sub) => `<button class="mainbtn" data-d="${key}" aria-pressed="${on === key}">${icon(ic)}<div><b>${title}</b><span>${sub}</span></div></button>`;
   const tool = (key, title) => `<button class="subbtn" data-d="${key}" aria-pressed="${on === key}">${title}</button>`;
   tilesEl.innerHTML = `<div class="mainnav">` +
-    main("dashboard", "now", "Now", `${rides.filter(r => r.date.slice(0, 7) === today.slice(0, 7)).length} rides in ${MONTH_NAMES[f.m - 1]}`) +
-    main("y" + cy, "cur", "Current season", `${n(cy)} rides in ${cy}`) +
-    main("y" + (cy + 1), "next", "Next season", `${n(cy + 1)} rides in ${cy + 1}`) +
+    main("dashboard", "now", "Now", `${plural(rides.filter(r => r.date.slice(0, 7) === today.slice(0, 7)).length, "ride", "rides")} in ${MONTH_NAMES[f.m - 1]}`) +
+    main("y" + cy, "cur", "Current season", `${plural(n(cy), "ride", "rides")} in ${cy}`) +
+    main("y" + (cy + 1), "next", "Next season", `${plural(n(cy + 1), "ride", "rides")} in ${cy + 1}`) +
     (past.length ? main("past", "past", "Past seasons", past.length > 1 ? `${past[0]} to ${past[past.length - 1]}` : `${past[0]}`) : "") +
     `</div><div class="subnav">${srIds() ? tool("sr", "One Week SR") : ""}${tool("assistant", "BRM Assistant")}</div>`;
 }
@@ -219,7 +274,7 @@ function startMap(ev) {                  // the usual start has an exact pin; ot
 }
 
 const cleanName = n => (n && n.length <= 80 ? n : "");        // ignore a ride name that is clearly page text
-const sec = (key, title, count, body) => `<details class="sect" data-sec="${key}" ${secOpen[key] ? "open" : ""}>
+const sec = (key, title, count, body, open = secOpen[key]) => `<details class="sect" data-sec="${key}" ${open ? "open" : ""}>
   <summary>${title}${count != null ? ` <span class="count">${count}</span>` : ""}</summary>${body}</details>`;
 
 function renderDetail() {
@@ -240,8 +295,8 @@ function renderDetail() {
     .map(([l, n]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join("");
   const prog = status.k === "ongoing" ? progressOf(ride) : null;
   const say = {
-    open: `Registration is open until ${closeText(ev)}. Use “Register on Audax India” to sign up.`,
-    closed: `Registration is closed. The ride starts on ${dateStr} at ${fmtTime(ev.startTime) || "the announced time"}. You can still open its registration page on Audax.`,
+    open: `Registration is open until ${closeText(ev)}. Tap “Register” to sign up on Audax.`,
+    closed: `Registration is closed. The ride starts on ${dateStr} at ${fmtTime(ev.startTime) || "the announced time"}.`,
     ongoing: `This ride is happening now, ${prog ? prog.text : "in progress"}. Results appear in the table below as riders finish.`,
     done: "This ride is finished. The results are in the table below."
   }[status.k] || "";
@@ -261,6 +316,7 @@ function renderDetail() {
     return `<tr${c.control ? ' class="ctl"' : ""}><td>${esc(c.location)}</td>${cueType ? `<td>${esc(c.type)}</td>` : ""}<td class="num">${esc(km2(partial))}</td><td class="num">${esc(km2(c.km))}</td></tr>`;
   }).join("");
   const cueHeads = ["Location", ...(cueType ? ["Type"] : []), ["Partial km", "num"], ["Total km", "num"]];
+  const cr = crossCache[current] || [];
   const back = origin && origin !== "dashboard" ? `${origin.slice(1)} season` : "Now";
 
   detailEl.innerHTML = `
@@ -282,8 +338,11 @@ function renderDetail() {
         </div>
       </div>
       <div class="actions">
-        ${ev.routeMap ? `<a class="btn" href="${esc(ev.routeMap)}" target="_blank" rel="noopener">View route</a>` : ""}
-        <a class="btn alt" href="${AUDAX}/event-e-${esc(current)}" target="_blank" rel="noopener">${!over ? "Register on Audax India" : closed && status.k === "closed" ? "Registration page on Audax" : "Event page on Audax"}</a>
+        ${(() => {
+          const route = ev.routeMap ? `<a class="btn${over ? "" : " alt"}" href="${esc(ev.routeMap)}" target="_blank" rel="noopener">View route</a>` : "";
+          const page = `<a class="btn${over ? " alt" : ""}" href="${AUDAX}/event-e-${esc(current)}" target="_blank" rel="noopener">${!over ? "Register" : status.k === "closed" ? "Registration page on Audax" : "Event page on Audax"}</a>`;
+          return over ? route + page : page + route;      // when registration is open, "Register" is the green main button
+        })()}
         <a class="btn alt" href="${AUDAX}/member-login.php" target="_blank" rel="noopener">Rider login</a>
       </div>
     </div>
@@ -301,6 +360,7 @@ function renderDetail() {
       <div class="scroll"><table>
         <thead><tr><th>#</th><th>Rider</th><th>AIR no.</th><th>Club</th><th>Fee paid</th><th>Medal</th><th>Result</th><th>Status</th></tr></thead>
         <tbody id="rows"></tbody></table></div>`)}
+    ${cr.length || status.k === "ongoing" ? sec("live", "Live control board", cr.length ? new Set(cr.map(x => x.air)).size : null, boardHtml(ev, route, cr, ev.date || ride.date), secOpen.live ?? status.k === "ongoing") : ""}
     ${controls ? sec("controls", "Controls (check-points)", ctl.length, table(controlHeads, controls)) : ""}
     ${cues ? sec("cue", "Cue sheet (turn by turn)", cue.length, table(cueHeads, cues)) : (route === null ? '<p class="note">Controls and cue sheet are not on Audax yet.</p>' : "")}`;
 
@@ -341,6 +401,7 @@ async function showEvent(id, force) {
     return;
   }
   await fetchRoute(id, force);
+  await fetchCrossings(id, force);
   if (current !== id) return;
   renderTiles(); renderDetail();
 }
@@ -548,22 +609,166 @@ async function ask() {
   } else out.textContent = "Question not understood. Try one of the examples above.";
 }
 
+// ---------- team area (hidden address: #team) ----------
+let desk = { tab: "desk", ride: "", control: "", q: "", sel: "" };
+let teamTimer = null;
+const tripLabel = r => { const f = dateParts(r.date); return `${f.wd} ${f.d} ${MON[f.m - 1]}, ${kmLabel(r.distance)}`; };
+const clockNow = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(11, 16);
+const parseClock = v => {
+  const m = String(v).trim().match(/^(\d{1,2})[:.](\d{2})$/);
+  if (!m || +m[1] > 23 || +m[2] > 59) throw new Error("Please type the time like 14:35");
+  let ts = Date.parse(`${todayIST()}T${pad2(m[1])}:${m[2]}:00+05:30`);
+  if (ts > Date.now() + 10 * 60e3) ts -= 864e5;       // a time later than now means yesterday (after midnight entries)
+  return ts;
+};
+const trackMsg = (code, name) => `Hello${name ? " " + name.split(" ")[0] : ""}! Live tracking for your safety on our SR ride.
+1) Install the free app "Traccar Client" (Play Store or App Store).
+2) In the app set:
+   Device identifier: ${code}
+   Server URL: ${API_BASE}/track
+   Frequency: 600 (seconds, which is every 10 minutes)
+3) Allow location "Always" (on Android also allow background use and no battery limit).
+4) Switch tracking ON before the start and OFF after you finish.
+Only the organising team can see your location, and only during your registered ride.`;
+
+function renderLogin(msg = "") {
+  detailEl.innerHTML = `<h2>Team sign-in</h2><p class="note">For the organising team only.</p>
+    <form id="loginForm" class="ask"><input id="pin" type="password" autocomplete="current-password" placeholder="Your team PIN" aria-label="Team PIN" required>
+    <button class="btn" type="submit">Sign in</button></form>${msg ? `<p class="error">${esc(msg)}</p>` : ""}`;
+  document.getElementById("loginForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    try {
+      const j = await api("/team/login", { pin: document.getElementById("pin").value });
+      localStorage.setItem(TEAM_KEY, JSON.stringify({ name: j.name, token: j.token, exp: Date.now() + 11.5 * 3600e3 }));
+      renderTeam();
+    } catch (err) { renderLogin(err.message); }
+  });
+}
+
+async function renderTeam() {
+  clearInterval(teamTimer);
+  const t = getTeam();
+  if (!t) return renderLogin();
+  const opts = rides.filter(r => r.id && Math.abs(dayDiff(r.date)) <= 4);
+  if (!opts.some(r => r.id === desk.ride)) {
+    const pick = opts.find(r => rideStatus(r).k === "ongoing") || opts.find(r => r.date >= todayIST()) || opts[opts.length - 1];
+    desk.ride = pick ? pick.id : ""; desk.control = "";
+  }
+  const tab = (k, label) => `<button type="button" class="subbtn" data-team="tab" data-tab="${k}" aria-pressed="${desk.tab === k}">${label}</button>`;
+  let html = `<h2>Team desk</h2><p class="note">Signed in as <b>${esc(t.name)}</b>. <button type="button" class="linkbtn" data-team="signout">Sign out</button></p>
+    <div class="subnav">${tab("desk", "Control desk")}${tab("track", "Live tracking")}</div>`;
+  if (!opts.length) { detailEl.innerHTML = html + `<p class="note">There is no ride in the next few days.</p>`; return; }
+  html += `<div class="tools"><select id="deskRide" aria-label="Ride">${opts.map(r => `<option value="${r.id}" ${r.id === desk.ride ? "selected" : ""}>${esc(tripLabel(r))}</option>`).join("")}</select></div>
+    <div id="deskBody">${loading("Loading…")}</div>`;
+  detailEl.innerHTML = html;
+  document.getElementById("deskRide").addEventListener("change", e => { desk.ride = e.target.value; desk.control = ""; renderTeam(); });
+  try {
+    await Promise.all([fetchEvent(desk.ride), fetchRoute(desk.ride), fetchCrossings(desk.ride, true)]);
+    if (current !== "team") return;
+    if (desk.tab === "desk") renderDesk(); else await renderTrackAdmin();
+  } catch (err) {
+    const b = document.getElementById("deskBody");
+    if (current === "team" && b) b.innerHTML = `<p class="error">${esc(err.message)}</p>`;
+  }
+}
+
+function renderDesk() {
+  const body = document.getElementById("deskBody");
+  if (!body || current !== "team") return;
+  const ev = cache[desk.ride], route = routeCache[desk.ride], ride = rides.find(r => r.id === desk.ride) || { date: todayIST() };
+  const ctl = route?.controls || [], cr = crossCache[desk.ride] || [];
+  if (!ctl.length) { body.innerHTML = `<p class="error">This ride's controls are not available from Audax yet, so times can't be recorded.</p>`; return; }
+  if (!ctl.some((c, i) => String(cno(c, i)) === desk.control)) desk.control = String(cno(ctl[0], 0));
+  const ci = ctl.findIndex((c, i) => String(cno(c, i)) === desk.control), c = ctl[ci];
+  const q = desk.q.trim().toLowerCase();
+  const list = (ev?.riders || []).filter(r => !q || `${r.name} ${r.air}`.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name));
+  const rec = air => cr.find(x => Number(x.no) === Number(desk.control) && sameAir(x.air, air));
+  const reachedLater = air => cr.some(x => sameAir(x.air, air) && Number(x.no) > Number(desk.control));
+  const cut = closeMs(c, ride.date);
+  const rows = list.map(r => {
+    const x = rec(r.air), late = !x && cut && Date.now() > cut && !reachedLater(r.air);    // not here yet and past this control's closing time
+    return `<div class="trow"><div class="tname"><b>${esc(r.name)}</b><small>AIR ${esc(r.air)}, ${esc(r.club)}</small></div><div class="tact">${
+      x ? `<span class="chip done">${esc(clockOf(x.ts, ride.date))}</span><button type="button" class="linkbtn" data-team="undo" data-id="${x.id}">Undo</button>`
+        : `${late ? '<span class="chip closed">Past closing time</span>' : ""}<button type="button" class="btn" data-team="now" data-air="${esc(r.air)}">Now</button><button type="button" class="btn alt" data-team="time" data-air="${esc(r.air)}">Set time</button>`}</div></div>`;
+  }).join("");
+  const done = cr.filter(x => Number(x.no) === Number(desk.control)).length;
+  body.innerHTML = `<div class="tools"><select id="deskControl" aria-label="Control">${ctl.map((k, i) =>
+      `<option value="${cno(k, i)}" ${i === ci ? "selected" : ""}>${esc(km2(k.km))} km, ${esc(k.location)}${k.close ? ` (closes ${esc(fmtTime(k.close.replace(/^D\d\s*/, "")))})` : ""}</option>`).join("")}</select></div>
+    <p class="note">Tap <b>Now</b> when a rider reaches this control, or <b>Set time</b> if you are entering it later. ${done} of ${(ev?.riders || []).length} riders recorded here.</p>
+    <div class="tools"><input id="deskQ" type="search" placeholder="Search name or AIR number" value="${esc(desk.q)}" aria-label="Search riders"></div>
+    <div class="trows">${rows || '<p class="note">No riders match.</p>'}</div>
+    <div class="tools"><input id="deskOther" placeholder="Other AIR number" aria-label="Other AIR number"><button type="button" class="btn alt" data-team="other">Record now</button></div>`;
+  document.getElementById("deskControl").addEventListener("change", e => { desk.control = e.target.value; renderDesk(); });
+  document.getElementById("deskQ").addEventListener("input", e => {
+    desk.q = e.target.value; renderDesk();
+    const el = document.getElementById("deskQ"); el.focus(); el.setSelectionRange(el.value.length, el.value.length);
+  });
+}
+
+async function renderTrackAdmin() {
+  const [codes, tr] = await Promise.all([api("/team/codes"), api(`/team/tracking/${desk.ride}`)]);
+  const body = document.getElementById("deskBody");
+  if (!body || current !== "team") return;
+  const ev = cache[desk.ride], ride = rides.find(r => r.id === desk.ride), live = ride && rideStatus(ride).k === "ongoing";
+  const codeOf = air => codes.codes.find(c => sameAir(c.air, air)), posOf = air => tr.positions.find(p => sameAir(p.air, air));
+  const ago = ts => { const m = Math.max(0, Math.round((Date.now() - ts) / 60000)); return m < 60 ? `${m} min ago` : `${Math.floor(m / 60)}h ${m % 60}m ago`; };
+  const rows = (ev?.riders || []).slice().sort((a, b) => a.name.localeCompare(b.name)).map(r => {
+    const c = codeOf(r.air), p = posOf(r.air), quiet = c && live && (!p || Date.now() - p.ts > 30 * 60e3);
+    return `<div class="trow"><div class="tname"><b>${esc(r.name)}</b><small>AIR ${esc(r.air)}</small></div><div class="tact">
+      ${c ? `<code class="code">${esc(c.token)}</code><button type="button" class="linkbtn" data-team="copy" data-code="${esc(c.token)}" data-name="${esc(r.name)}">Copy message</button>`
+          : `<button type="button" class="btn alt" data-team="code" data-air="${esc(r.air)}" data-name="${esc(r.name)}">Make code</button>`}
+      ${p ? `<button type="button" class="linkbtn" data-team="pick" data-air="${esc(r.air)}">${esc(ago(p.ts))}${p.batt != null ? `, battery ${Math.round(p.batt)}%` : ""}</button>` : (c ? '<span class="chip load">No signal yet</span>' : "")}
+      ${quiet ? '<span class="chip closed">Silent over 30 min</span>' : ""}</div></div>`;
+  }).join("");
+  const sel = desk.sel && posOf(desk.sel);
+  body.innerHTML = `<p class="note">Riders who agree to be tracked get a personal code. Their location is only kept while they are registered for a ride that is on, and only the team can see it.</p>
+    ${sel ? `<div class="tmap"><iframe class="map" title="Rider location" src="https://www.google.com/maps?q=${sel.lat},${sel.lon}&z=15&output=embed"></iframe>
+      <p class="note">Last seen ${esc(ago(sel.ts))}${sel.speed != null ? `, ${Math.round(sel.speed)} km/h` : ""}. <a href="https://www.google.com/maps?q=${sel.lat},${sel.lon}" target="_blank" rel="noopener">Open in Google Maps</a></p></div>` : ""}
+    <div class="trows">${rows || '<p class="note">No registered riders yet.</p>'}</div>`;
+  teamTimer = setInterval(() => { if (current === "team" && desk.tab === "track" && document.activeElement?.tagName !== "INPUT") renderTeam(); }, 60000);
+}
+
+async function record(air, ts) {
+  await api("/team/crossing", { rideId: desk.ride, controlNo: Number(desk.control), air, ts });
+  await fetchCrossings(desk.ride, true);
+  renderDesk();
+}
+detailEl.addEventListener("click", async e => {
+  const t = e.target.closest("[data-team]");
+  if (!t) return;
+  const act = t.dataset.team, air = t.dataset.air;
+  try {
+    if (act === "signout") { localStorage.removeItem(TEAM_KEY); renderTeam(); }
+    else if (act === "tab") { desk.tab = t.dataset.tab; renderTeam(); }
+    else if (act === "now") await record(air);
+    else if (act === "time") { const v = prompt("Time at this control (24-hour, like 14:35)", clockNow()); if (v) await record(air, parseClock(v)); }
+    else if (act === "other") { const v = document.getElementById("deskOther").value.trim(); if (v) await record(v); }
+    else if (act === "undo") { await api("/team/crossing/delete", { id: Number(t.dataset.id) }); await fetchCrossings(desk.ride, true); renderDesk(); }
+    else if (act === "code") { await api("/team/codes", { air, name: t.dataset.name }); renderTeam(); }
+    else if (act === "copy") { await navigator.clipboard.writeText(trackMsg(t.dataset.code, t.dataset.name)); t.textContent = "Copied. Paste it into WhatsApp"; }
+    else if (act === "pick") { desk.sel = air; renderTeam(); }
+  } catch (err) { alert(err.message); }
+});
+
 // ---------- routing and refresh ----------
 function select() {
   const h = location.hash.slice(1), wk = weekRides();
   const byDistance = /^(200|300|400|600)$/.test(h) ? wk.find(r => r.distance === h) : null;   // old links like #600
   if (/^e\d+$/.test(h)) current = h.slice(1);
   else if (byDistance) current = byDistance.id;
+  else if (h === "team") current = "team";
   else if (isList(h) || h === "sr" || h === "assistant") current = h;
   else current = "dashboard";
   if (current === "dashboard" || isSeason(current)) origin = current;
-  else if (!origin && !["sr", "assistant", "past"].includes(current)) {                      // opened a ride link directly
+  else if (!origin && !["sr", "assistant", "past", "team"].includes(current)) {                      // opened a ride link directly
     const r = rides.find(x => x.id === current);
     origin = r ? (r.date.slice(0, 7) === todayIST().slice(0, 7) ? "dashboard" : "y" + r.date.slice(0, 4)) : "dashboard";
   }
+  clearInterval(teamTimer);
   renderTiles();
   window.scrollTo?.(0, 0);
-  if (current === "sr") showSR();
+  if (current === "team") renderTeam();
+  else if (current === "sr") showSR();
   else if (current === "assistant") showAssistant();
   else if (isList(current)) renderCurrentList();
   else showEvent(current);
@@ -579,6 +784,14 @@ setInterval(async () => {
   else if (current === "sr") renderSR();
   else if (isList(current)) renderCurrentList();
 }, REFRESH_MS);
+
+setInterval(async () => {                 // while a ride is on, check for new control times every minute
+  if (!cache[current] || document.activeElement?.tagName === "INPUT") return;
+  const r = rides.find(x => x.id === current);
+  if (!r || rideStatus(r).k !== "ongoing") return;
+  await fetchCrossings(current, true);
+  renderDetail();
+}, 60 * 1000);
 
 (async () => {
   detailEl.innerHTML = loading("Loading rides…");
