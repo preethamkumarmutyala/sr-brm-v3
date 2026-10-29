@@ -262,3 +262,17 @@ td.num { width: 1%; }
   .chip.ongoing::before { animation: none; }
   * { transition: none !important; }
 }
+
+/* control board, team desk */
+.kmbar { min-width: 5rem; height: .35rem; margin-top: .25rem; border-radius: 999px; background: var(--live-bg); overflow: hidden; }
+.kmbar i { display: block; height: 100%; width: var(--p, 0%); background: var(--live); border-radius: inherit; }
+details.inner { margin-top: .8rem; }
+details.inner > summary { cursor: pointer; font-weight: 500; margin-bottom: .4rem; }
+.ctlrow { display: flex; gap: 1rem; justify-content: space-between; flex-wrap: wrap; padding: .45rem 0; border-top: 1px solid var(--line); }
+.ctlrow span { text-align: right; color: var(--muted); }
+.trow { display: flex; gap: .75rem; justify-content: space-between; align-items: center; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: .6rem .8rem; margin-bottom: .5rem; }
+.tname small { display: block; color: var(--muted); font-size: .85rem; }
+.tact { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.tact .btn { padding: .4rem 1rem; }
+.code { font-family: ui-monospace, "SF Mono", Menlo, monospace; background: var(--surface2); border: 1px solid var(--line); border-radius: 8px; padding: .1rem .55rem; letter-spacing: .08em; }
+.tmap { margin-bottom: 1rem; }
