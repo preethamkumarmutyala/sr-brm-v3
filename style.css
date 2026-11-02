@@ -276,3 +276,30 @@ details.inner > summary { cursor: pointer; font-weight: 500; margin-bottom: .4re
 .tact .btn { padding: .4rem 1rem; }
 .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; background: var(--surface2); border: 1px solid var(--line); border-radius: 8px; padding: .1rem .55rem; letter-spacing: .08em; }
 .tmap { margin-bottom: 1rem; }
+
+.tag.riding { background: var(--live-bg); color: var(--live); }
+.tag.waiting { background: var(--warn-bg); color: var(--warn); }
+
+/* control desk grid: one row per rider, one column per control */
+.tmodes { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin: .6rem 0; }
+.tgridwrap { overflow: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); max-height: 72vh; }
+.tgrid { display: grid; grid-template-columns: minmax(9.5rem, 12rem) repeat(var(--n), minmax(5.6rem, 1fr)) minmax(9rem, 10rem); width: 100%; min-width: calc(12rem + var(--n) * 5.6rem + 9rem); }
+.tgrid > * { border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); padding: .3rem .45rem; min-width: 0; background: var(--surface); }
+.tgrid .th { position: sticky; top: 0; z-index: 2; background: var(--surface2); font-weight: 500; font-size: .85rem; text-align: center; }
+.tgrid .th small { display: block; color: var(--muted); font-weight: 400; font-size: .7rem; }
+.tgrid .rname, .tgrid .tcellname { position: sticky; left: 0; z-index: 1; }
+.tgrid .th.rname { z-index: 3; text-align: left; }
+.tgrid .alt { background: var(--surface2); }
+.tcellname b { display: block; font-weight: 500; font-size: .9rem; line-height: 1.2; }
+.tcellname small { color: var(--muted); }
+input.tcell { width: 100%; min-width: 0; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); border-radius: 0; text-align: center; font: inherit; font-variant-numeric: tabular-nums; background: var(--surface); color: var(--text); padding: .5rem .15rem; }
+input.tcell.alt { background: var(--surface2); }
+input.tcell.late { background: var(--bad-bg); }
+input.tcell.off { opacity: .45; }
+input.tcell.saved { background: var(--ok-bg); }
+input.tcell[readonly] { cursor: pointer; }
+input.tcell:focus { outline: 2px solid var(--brand); outline-offset: -2px; background: var(--stub); }
+select.tmark { font: inherit; font-size: .8rem; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); border-radius: 0; color: inherit; }
+
+.cplist { margin: .2rem 0 .4rem; padding-left: 0; list-style: none; display: grid; gap: .15rem; font-size: .9rem; }
+.cplist b { display: inline-block; min-width: 3rem; }
