@@ -345,6 +345,10 @@ async function handleTeam(request, env, b, c) {
   const post = request.method === "POST";
   const body = post ? await request.json().catch(() => ({})) : {};
   const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  if (b === "bootstrap" && c === "status" && !post) {
+    const active = await d.prepare("SELECT 1 AS active FROM team_users WHERE status='active' LIMIT 1").first();
+    return json(request, { available: !active }, 200, { "Cache-Control": "no-store" });
+  }
   const blocked = async () => { const r = await d.prepare("SELECT COUNT(*) AS n FROM login_fails WHERE ip=? AND ts>?").bind(ip, Date.now() - 15 * 60e3).first(); return r && r.n >= 8; };
 
   const sendMail = async (to, subject, token, kind) => {
@@ -506,7 +510,7 @@ async function handleTeam(request, env, b, c) {
     const rideId = String(body.rideId || ""), no = Number(body.controlNo), air = String(body.air || "").trim();
     if (!/^\d{3,6}$/.test(rideId) || !Number.isInteger(no) || no < 1 || no > 500 || !validAir(air)) return json(request, { error: "The ride, control or AIR number is not valid." }, 400);
     const ts = Number(body.ts) || Date.now();
-    if (ts > Date.now() + 10 * 60e3 || ts < Date.now() - 72 * 3600e3) return json(request, { error: "That time is not valid (in the future or more than 3 days ago)." }, 400);
+    if (ts > Date.now() + 10 * 60e3) return json(request, { error: "That time is in the future." }, 400);
     await d.batch([
       d.prepare("UPDATE crossings SET deleted = 1 WHERE ride_id = ? AND control_no = ? AND air = ? AND deleted = 0").bind(rideId, no, air),
       d.prepare("INSERT INTO crossings (ride_id, control_no, air, ts, entered_by, created) VALUES (?, ?, ?, ?, ?, ?)").bind(rideId, no, air, ts, who.email, Date.now()),

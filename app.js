@@ -666,7 +666,9 @@ function renderLogin(msg = "") {
   } catch (err) { renderLogin(err.message); } });
   document.getElementById("forgotPassword").addEventListener("click", () => { document.getElementById("forgotForm").hidden = false; });
   document.getElementById("forgotForm").addEventListener("submit", async e => { e.preventDefault(); try { const j = await api("/team/forgot", { email: document.getElementById("forgotEmail").value }); document.getElementById("authMessage").textContent = j.message; } catch (err) { renderLogin(err.message); } });
-  document.getElementById("bootstrapAdmin").addEventListener("click", async () => { const email = prompt("Enter the configured staging administrator email"); if (!email) return; try { const j = await api("/team/bootstrap", { email }); document.getElementById("authMessage").textContent = j.message; } catch (err) { renderLogin(err.message); } });
+  const bootstrapAdmin = document.getElementById("bootstrapAdmin");
+  api("/team/bootstrap/status").then(({ available }) => { bootstrapAdmin.hidden = !available; }).catch(() => { bootstrapAdmin.hidden = true; });
+  bootstrapAdmin.addEventListener("click", async () => { const email = prompt("Enter the configured administrator email"); if (!email) return; try { const j = await api("/team/bootstrap", { email }); document.getElementById("authMessage").textContent = j.message; } catch (err) { renderLogin(err.message); } });
 }
 
 async function renderTeam() {
