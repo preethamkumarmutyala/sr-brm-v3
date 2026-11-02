@@ -289,7 +289,7 @@ const randomToken = () => b64u(crypto.getRandomValues(new Uint8Array(32)));
 const hash = async s => b64u(await crypto.subtle.digest("SHA-256", enc.encode(s)));
 async function passwordHash(password, salt) {
   const key = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
-  return b64u(await crypto.subtle.deriveBits({ name: "PBKDF2", salt: unb64u(salt), iterations: 150000, hash: "SHA-256" }, key, 256));
+  return b64u(await crypto.subtle.deriveBits({ name: "PBKDF2", salt: unb64u(salt), iterations: 100000, hash: "SHA-256" }, key, 256));
 }
 async function whoIs(request, env) {
   const token = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
