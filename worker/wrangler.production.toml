@@ -1,0 +1,19 @@
+# Production deployment for the existing sr-brm D1 database.
+name = "sr-brm-api"
+main = "index.js"
+compatibility_date = "2026-11-02"
+workers_dev = true
+preview_urls = false
+
+[vars]
+APP_ORIGIN = "https://sr-brm-v3.pages.dev"
+GMAIL_USER = "preethamkumar@gmail.com"
+BOOTSTRAP_ADMIN_EMAIL = "preethamkumar@gmail.com"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sr-brm"
+database_id = "c8e02e3f-ccb2-446b-b7c0-d3669ed01a42"
+
+[observability]
+enabled = true
