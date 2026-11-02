@@ -10,6 +10,7 @@ workers_dev = true
 APP_ORIGIN = "https://staging.sr-brm-v3.pages.dev"
 GMAIL_USER = "preethamkumar@gmail.com"
 BOOTSTRAP_ADMIN_EMAIL = "preethamkumar@gmail.com"
+STAGING_MODE = "true"
 
 [[d1_databases]]
 binding = "DB"

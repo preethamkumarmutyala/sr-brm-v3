@@ -639,10 +639,10 @@ const trackMsg = (code, name) => `Hello${name ? " " + name.split(" ")[0] : ""}! 
 2) In the app set:
    Device identifier: ${code}
    Server URL: ${API_BASE}/track
-   Frequency: 600 (seconds, which is every 10 minutes)
+   Frequency: ${API_BASE.includes("-staging") ? "30 (seconds, for this staging test)" : "600 (seconds, which is every 10 minutes)"}
 3) Allow location "Always" (on Android also allow background use and no battery limit).
 4) Switch tracking ON before the start and OFF after you finish.
-Only the organising team can see your location, and only during your registered ride.`;
+Only the organising team can see your location. Staging test positions go to the isolated staging database.`;
 
 function storeTeam(j) { localStorage.setItem(TEAM_KEY, JSON.stringify({ email: j.email, role: j.role, token: j.token, exp: Date.now() + 11.5 * 3600e3 })); }
 function renderLogin(msg = "") {
