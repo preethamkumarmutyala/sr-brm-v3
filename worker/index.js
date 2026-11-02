@@ -16,6 +16,34 @@ const CALENDAR_HOME = `${SOURCE}/events.php`;   // Audax's current-year calendar
 const YEARS_BACK = 1;                          // past seasons to include before the current one (1 = last year; raise it to go further back)
 const YEARS_AHEAD = 1;                         // upcoming rides: this many years after the current one
 const LEGACY = { "600": "10047", "200": "10048", "300": "10049", "400": "10050" };
+const TEST_RIDE_ID = "999999";
+const TEST_AIR = "TEST001";
+
+function virtualTestEvent() {
+  const now = new Date(Date.now() - 10 * 60e3 + 5.5 * 3600e3);
+  const date = now.toISOString().slice(0, 10), [year, month, day] = date.split("-");
+  const startTime = now.toISOString().slice(11, 16);
+  const monthName = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(month) - 1];
+  return {
+    id: TEST_RIDE_ID, year: Number(year), month: Number(month), day: Number(day), date,
+    distance: "10", title: `Virtual staging ride on ${Number(day)}-${monthName}-${year}`,
+    rideName: "Staging GPS and checkpoint test", registrationClose: "", startTime,
+    startLocation: "Virtual test ride", routeMap: "", calendarId: TEST_RIDE_ID, routeId: "",
+    riderCount: 1, riders: [{ seq: "1", name: "Staging Test Rider", air: TEST_AIR, fee: "", medal: "", result: "", club: "Staging" }],
+    fetchedAt: new Date().toISOString()
+  };
+}
+
+function virtualTestRoute() {
+  const controls = [
+    { no: 1, km: "0.00", location: "Virtual start", type: "START POINT", open: "", close: "" },
+    { no: 2, km: "5.00", location: "Test control 1", type: "CONTROL", open: "", close: "" },
+    { no: 3, km: "10.00", location: "Virtual finish", type: "END POINT", open: "", close: "" }
+  ];
+  return { id: TEST_RIDE_ID, info: { routeName: "Staging virtual 10 km", distance: "10.00" }, controls,
+    cue: controls.map((c, i) => ({ no: i + 1, control: true, location: c.location, type: c.type, partial: i ? "5.00" : "0.00", km: c.km, open: "", close: "" })),
+    fetchedAt: new Date().toISOString() };
+}
 
 const CACHE_TTL = 300;          // event + riders: 5 minutes (older events: 6 hours)
 const ROUTE_TTL = 1800;         // route card: 30 minutes
@@ -588,7 +616,9 @@ async function handleTrack(request, env, ctx, url) {
   if (!token || !isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return ok();
   const rider = await d.prepare("SELECT air FROM tracking_codes WHERE token = ? AND active = 1").bind(token).first();
   if (!rider) return ok();
-  const ride = await activeRideFor(rider.air, ctx);
+  const ride = env.STAGING_MODE === "true" && rider.air === TEST_AIR
+    ? { id: TEST_RIDE_ID }
+    : await activeRideFor(rider.air, ctx);
   if (!ride) return ok();                                          // not registered for a ride that is on now: nothing is kept
 
   const raw = p.get("timestamp") || "";
@@ -621,8 +651,12 @@ export default {
       if (request.method !== "GET") return json(request, { error: "Method not allowed" }, 405);
       if (a === "calendar") {
         const { data, cache } = await getCalendar(ctx);
+        if (env.STAGING_MODE === "true") data.rides = [...data.rides.filter(r => r.id !== TEST_RIDE_ID), virtualTestEvent()];
         return json(request, data, 200, { "Cache-Control": "public, max-age=300", "X-Cache": cache });
       }
+
+      if (env.STAGING_MODE === "true" && a === "ev" && b === TEST_RIDE_ID) return json(request, virtualTestEvent(), 200, { "Cache-Control": "no-store" });
+      if (env.STAGING_MODE === "true" && a === "rt" && b === TEST_RIDE_ID) return json(request, virtualTestRoute(), 200, { "Cache-Control": "no-store" });
 
       let id = null;
       if ((a === "ev" || a === "rt") && /^\d{3,6}$/.test(b || "")) id = b;
