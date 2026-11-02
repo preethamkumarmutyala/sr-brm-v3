@@ -339,6 +339,7 @@ async function db(env) {                  // the tables are created automaticall
       q("CREATE TABLE IF NOT EXISTS tracking_codes (token TEXT PRIMARY KEY, air TEXT NOT NULL, name TEXT, created INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1)"),
       q("CREATE TABLE IF NOT EXISTS positions (id INTEGER PRIMARY KEY AUTOINCREMENT, ride_id TEXT NOT NULL, air TEXT NOT NULL, ts INTEGER NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL, speed REAL, batt REAL)"),
       q("CREATE INDEX IF NOT EXISTS idx_positions_ride ON positions (ride_id, air, ts)"),
+      q("CREATE TABLE IF NOT EXISTS rider_progress (ride_id TEXT NOT NULL, air TEXT NOT NULL, km REAL NOT NULL DEFAULT 0, last_lat REAL NOT NULL, last_lon REAL NOT NULL, last_ts INTEGER NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY (ride_id, air))"),
       q("CREATE TABLE IF NOT EXISTS login_fails (ip TEXT NOT NULL, ts INTEGER NOT NULL)"),
       q("CREATE TABLE IF NOT EXISTS team_users (email TEXT PRIMARY KEY, role TEXT NOT NULL, status TEXT NOT NULL, salt TEXT, password_hash TEXT, created_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)"),
       q("CREATE TABLE IF NOT EXISTS team_auth_tokens (token_hash TEXT PRIMARY KEY, email TEXT NOT NULL, kind TEXT NOT NULL, expires INTEGER NOT NULL, created_by TEXT, created_at INTEGER NOT NULL)"),
@@ -539,10 +540,15 @@ async function handleTeam(request, env, b, c) {
     if (!/^\d{3,6}$/.test(rideId) || !Number.isInteger(no) || no < 1 || no > 500 || !validAir(air)) return json(request, { error: "The ride, control or AIR number is not valid." }, 400);
     const ts = Number(body.ts) || Date.now();
     if (ts > Date.now() + 10 * 60e3) return json(request, { error: "That time is in the future." }, 400);
+    const isFirstStart = no === 1 && !await d.prepare("SELECT 1 AS yes FROM crossings WHERE ride_id=? AND control_no=1 AND air=? AND deleted=0 LIMIT 1").bind(rideId, air).first();
     await d.batch([
       d.prepare("UPDATE crossings SET deleted = 1 WHERE ride_id = ? AND control_no = ? AND air = ? AND deleted = 0").bind(rideId, no, air),
       d.prepare("INSERT INTO crossings (ride_id, control_no, air, ts, entered_by, created) VALUES (?, ?, ?, ?, ?, ?)").bind(rideId, no, air, ts, who.email, Date.now()),
       d.prepare("UPDATE rider_marks SET deleted = 1 WHERE ride_id = ? AND air = ? AND mark = 'dns' AND deleted = 0").bind(rideId, air)
+    ]);
+    if (isFirstStart) await d.batch([
+      d.prepare("DELETE FROM positions WHERE ride_id=? AND air=?").bind(rideId, air),
+      d.prepare("DELETE FROM rider_progress WHERE ride_id=? AND air=?").bind(rideId, air)
     ]);
     return json(request, { ok: true });
   }
@@ -573,7 +579,7 @@ async function handleTeam(request, env, b, c) {
 
   if (b === "tracking" && /^\d{3,6}$/.test(c || "")) {              // latest known position of each tracked rider
     const { results } = await d.prepare(
-      "SELECT p.air, p.ts, p.lat, p.lon, p.speed, p.batt FROM positions p JOIN (SELECT air, MAX(ts) AS m FROM positions WHERE ride_id = ? GROUP BY air) x ON p.air = x.air AND p.ts = x.m WHERE p.ride_id = ?"
+      "SELECT p.air, p.ts, p.lat, p.lon, p.speed, p.batt, COALESCE(g.km, 0) AS km FROM positions p JOIN (SELECT air, MAX(ts) AS m FROM positions WHERE ride_id = ? GROUP BY air) x ON p.air = x.air AND p.ts = x.m LEFT JOIN rider_progress g ON g.ride_id=p.ride_id AND g.air=p.air WHERE p.ride_id = ?"
     ).bind(c, c).all();
     return json(request, { positions: results }, 200, { "Cache-Control": "no-store" });
   }
@@ -598,6 +604,30 @@ async function activeRideFor(air, ctx) {
   return null;
 }
 
+function kmBetween(lat1, lon1, lat2, lon2) {
+  const rad = x => x * Math.PI / 180, dLat = rad(lat2 - lat1), dLon = rad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+async function trackingEnabled(d, env, rideId, air, ctx) {
+  const mark = await d.prepare("SELECT mark FROM rider_marks WHERE ride_id=? AND air=? AND deleted=0 ORDER BY ts DESC LIMIT 1").bind(rideId, air).first();
+  if (mark && ["dns", "dnf"].includes(mark.mark)) return false;
+  const route = env.STAGING_MODE === "true" && rideId === TEST_RIDE_ID
+    ? virtualTestRoute()
+    : (await getRoute(rideId, ctx)).data;
+  const controls = route?.controls || [];
+  const startNo = Number(controls[0]?.no) || 1;
+  const started = await d.prepare("SELECT 1 AS yes FROM crossings WHERE ride_id=? AND air=? AND control_no=? AND deleted=0 LIMIT 1").bind(rideId, air, startNo).first();
+  if (!started) return false;
+  if (controls.length > 1) {
+    const lastNo = Number(controls[controls.length - 1]?.no) || controls.length;
+    const finished = await d.prepare("SELECT 1 AS yes FROM crossings WHERE ride_id=? AND air=? AND control_no=? AND deleted=0 LIMIT 1").bind(rideId, air, lastNo).first();
+    if (finished) return false;
+  }
+  return true;
+}
+
 // Location pings from the Traccar Client app (same simple request format as OsmAnd/Traccar: id, lat, lon, timestamp, speed in knots, batt)
 async function handleTrack(request, env, ctx, url) {
   const ok = () => json(request, { ok: true });                    // always answer OK so the phone never piles up retries
@@ -620,15 +650,30 @@ async function handleTrack(request, env, ctx, url) {
     ? { id: TEST_RIDE_ID }
     : await activeRideFor(rider.air, ctx);
   if (!ride) return ok();                                          // not registered for a ride that is on now: nothing is kept
+  if (!(await trackingEnabled(d, env, ride.id, rider.air, ctx))) return ok();
 
   const raw = p.get("timestamp") || "";
   let ts = /^\d+(\.\d+)?$/.test(raw) ? Number(raw) * (Number(raw) < 1e12 ? 1000 : 1) : Date.parse(raw);
   const now = Date.now();
   if (!isFinite(ts) || ts > now + 5 * 60e3 || ts < now - 12 * 3600e3) ts = now;
   const speed = Number(p.get("speed")), batt = Number(p.get("batt"));
+  const prev = await d.prepare("SELECT km,last_lat,last_lon,last_ts FROM rider_progress WHERE ride_id=? AND air=?").bind(ride.id, rider.air).first();
+  let km = prev?.km || 0;
+  if (!prev || ts > prev.last_ts) {
+    if (prev) {
+      const segment = kmBetween(prev.last_lat, prev.last_lon, lat, lon), hours = (ts - prev.last_ts) / 3600e3;
+      // Ignore GPS jitter below 20 m and implausible jumps above 100 km/h.
+      if (segment >= 0.02 && hours > 0 && segment / hours <= 100) km += segment;
+    }
+    await d.prepare("INSERT INTO rider_progress (ride_id,air,km,last_lat,last_lon,last_ts,updated) VALUES (?,?,?,?,?,?,?) ON CONFLICT(ride_id,air) DO UPDATE SET km=excluded.km,last_lat=excluded.last_lat,last_lon=excluded.last_lon,last_ts=excluded.last_ts,updated=excluded.updated")
+      .bind(ride.id, rider.air, km, lat, lon, ts, now).run();
+  }
   await d.prepare("INSERT INTO positions (ride_id, air, ts, lat, lon, speed, batt) VALUES (?, ?, ?, ?, ?, ?, ?)")
     .bind(ride.id, rider.air, ts, lat, lon, isFinite(speed) && p.get("speed") !== null ? speed * 1.852 : null, isFinite(batt) && p.get("batt") !== null ? batt : null).run();
-  if (Math.random() < 0.01) ctx.waitUntil(d.prepare("DELETE FROM positions WHERE ts < ?").bind(now - 30 * 864e5).run());   // keep 30 days
+  if (Math.random() < 0.01) ctx.waitUntil(d.batch([
+    d.prepare("DELETE FROM positions WHERE ts < ?").bind(now - 30 * 864e5),
+    d.prepare("DELETE FROM rider_progress WHERE updated < ?").bind(now - 30 * 864e5)
+  ]));   // keep location and distance data for 30 days
   return ok();
 }
 
@@ -653,6 +698,13 @@ export default {
         const { data, cache } = await getCalendar(ctx);
         if (env.STAGING_MODE === "true") data.rides = [...data.rides.filter(r => r.id !== TEST_RIDE_ID), virtualTestEvent()];
         return json(request, data, 200, { "Cache-Control": "public, max-age=300", "X-Cache": cache });
+      }
+
+      if (a === "progress" && /^\d{3,6}$/.test(b || "")) {
+        const d = await db(env);
+        if (!d) return json(request, { ready: false, progress: [] }, 200, { "Cache-Control": "no-store" });
+        const { results } = await d.prepare("SELECT air, ROUND(km, 2) AS km, updated AS ts FROM rider_progress WHERE ride_id=? ORDER BY km DESC").bind(b).all();
+        return json(request, { progress: results }, 200, { "Cache-Control": "no-store" });
       }
 
       if (env.STAGING_MODE === "true" && a === "ev" && b === TEST_RIDE_ID) return json(request, virtualTestEvent(), 200, { "Cache-Control": "no-store" });

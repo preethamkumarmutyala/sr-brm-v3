@@ -194,11 +194,16 @@ async function api(path, body) {          // talks to the Worker; sends the team
   if (!res.ok) throw new Error(j.error || "Server returned " + res.status);
   return j;
 }
-const crossCache = {}, markCache = {};
+const crossCache = {}, markCache = {}, progressCache = {};
 async function fetchCrossings(id, force) {
   if (!force && crossCache[id]) return crossCache[id];
   try { const j = await api(`/crossings/${id}`); crossCache[id] = j.crossings || []; markCache[id] = j.marks || []; } catch (_) { crossCache[id] = crossCache[id] || []; }
   return crossCache[id];
+}
+async function fetchProgress(id) {
+  try { const r = await fetch(`${API_BASE}/progress/${id}`), j = await r.json(); progressCache[id] = r.ok ? (j.progress || []) : []; }
+  catch (_) { progressCache[id] = progressCache[id] || []; }
+  return progressCache[id];
 }
 const sameAir = (a, b) => String(a).trim().replace(/^0+/, "") === String(b).trim().replace(/^0+/, "");
 const cno = (c, i) => Number(c.no ?? i + 1);                       // a control's number (its position in the list if Audax gives none)
@@ -208,9 +213,9 @@ const clockOf = (ts, rideDate) => {       // "08:41 AM", or "D2 03:10 AM" after 
 };
 const closeMs = (c, date) => { const m = (c.close || "").match(/D(\d)\s+(\d{1,2}):(\d{2})/); return m ? Date.parse(`${date}T${pad2(m[2])}:${m[3]}:00+05:30`) + (Number(m[1]) - 1) * 864e5 : null; };
 
-function boardHtml(ev, route, cr, rideDate) {       // who has reached which control (times recorded by the team)
+function boardHtml(ev, route, cr, rideDate, gps = []) {       // team checkpoints plus consented GPS distance, without public coordinates
   const ctl = route?.controls || [];
-  if (!cr.length) return `<p class="note">No control times have been recorded yet. Our team notes the time each rider reaches a control, and it shows up here.</p>`;
+  if (!cr.length && !gps.length) return `<p class="note">No control times or GPS distance updates have been recorded yet.</p>`;
   const idx = no => ctl.findIndex((c, k) => cno(c, k) === Number(no));
   const kmOf = no => (idx(no) < 0 ? NaN : Number(ctl[idx(no)].km));
   const ctlName = no => (idx(no) < 0 ? `Control ${no}` : ctl[idx(no)].location);
@@ -218,19 +223,23 @@ function boardHtml(ev, route, cr, rideDate) {       // who has reached which con
   const total = Number(route?.info?.distance) || Number(ctl[ctl.length - 1]?.km) || 0;
   const byAir = {};
   for (const x of cr) (byAir[x.air] ||= []).push(x);
-  const rows = Object.entries(byAir).map(([air, list]) => {
-    const last = list.reduce((a, b) => ((kmOf(b.no) || 0) > (kmOf(a.no) || 0) ? b : a));
-    return { air, last, km: kmOf(last.no) };
-  }).sort((a, b) => (b.km || 0) - (a.km || 0) || a.last.ts - b.last.ts);
-  const body = rows.map(r => `<tr><td>${esc(nameOf(r.air))}</td><td>${esc(ctlName(r.last.no))}</td>
-    <td class="num">${isFinite(r.km) ? esc(km2(r.km)) + " km" : ""}${total && isFinite(r.km) ? `<div class="kmbar"><i style="--p:${Math.min(100, Math.round((r.km / total) * 100))}%"></i></div>` : ""}</td>
-    <td class="num">${esc(clockOf(r.last.ts, rideDate))}</td></tr>`).join("");
+  const gpsOf = air => gps.find(x => sameAir(x.air, air));
+  const airs = new Set([...Object.keys(byAir), ...gps.map(x => x.air)]);
+  const rows = [...airs].map(air => {
+    const list = byAir[air] || [], last = list.length ? list.reduce((a, b) => ((kmOf(b.no) || 0) > (kmOf(a.no) || 0) ? b : a)) : null;
+    return { air, last, km: last ? kmOf(last.no) : NaN, gps: gpsOf(air) };
+  }).sort((a, b) => ((b.gps?.km || 0) - (a.gps?.km || 0)) || ((b.km || 0) - (a.km || 0)));
+  const body = rows.map(r => `<tr><td>${esc(nameOf(r.air))}</td><td>${r.last ? esc(ctlName(r.last.no)) : "Not checked in"}</td>
+    <td class="num">${r.last && isFinite(r.km) ? esc(km2(r.km)) + " km" : "—"}${total && isFinite(r.km) ? `<div class="kmbar"><i style="--p:${Math.min(100, Math.round((r.km / total) * 100))}%"></i></div>` : ""}</td>
+    <td class="num">${r.gps ? `~${esc(km2(r.gps.km))} km` : "—"}</td>
+    <td class="num">${r.last ? esc(clockOf(r.last.ts, rideDate)) : "—"}</td>
+    <td class="num">${r.gps ? esc(clockOf(r.gps.ts, rideDate)) : "—"}</td></tr>`).join("");
   const each = ctl.map((c, i) => {
     const here = cr.filter(x => Number(x.no) === cno(c, i)).sort((a, b) => a.ts - b.ts);
     return here.length ? `<div class="ctlrow"><b>${esc(km2(c.km))} km, ${esc(c.location)}</b><span>${here.map(x => `${esc(clockOf(x.ts, rideDate))} ${esc(nameOf(x.air))}`).join("<br>")}</span></div>` : "";
   }).join("");
-  return `<p class="note">Updated by the organising team at the controls. Km done is the distance of the last control a rider has crossed.</p>
-    ${table(["Rider", "Last control", ["Km done", "num"], ["Time", "num"]], body)}
+  return `<p class="note">Checkpoint times are entered by the organising team. GPS km is an approximate distance from consented location updates; exact locations are visible to the team only.</p>
+    ${table(["Rider", "Last control", ["Checkpoint km", "num"], ["GPS km approx.", "num"], ["CP time", "num"], ["GPS update", "num"]], body)}
     ${each ? `<details class="inner"><summary>Times at each control</summary>${each}</details>` : ""}`;
 }
 
@@ -373,7 +382,7 @@ function renderDetail() {
       <div class="scroll"><table>
         <thead><tr><th>#</th><th>Rider</th><th>AIR no.</th><th>Club</th><th>Fee paid</th><th>Medal</th><th>Result</th><th>Status</th></tr></thead>
         <tbody id="rows"></tbody></table></div>`)}
-    ${cr.length || status.k === "ongoing" ? sec("live", "Live control board", cr.length ? new Set(cr.map(x => x.air)).size : null, boardHtml(ev, route, cr, ev.date || ride.date), secOpen.live ?? status.k === "ongoing") : ""}
+    ${cr.length || progressCache[current]?.length || status.k === "ongoing" ? sec("live", "Live control board", new Set([...cr.map(x => x.air), ...(progressCache[current] || []).map(x => x.air)]).size || null, boardHtml(ev, route, cr, ev.date || ride.date, progressCache[current] || []), secOpen.live ?? status.k === "ongoing") : ""}
     ${controls ? sec("controls", "Controls (check-points)", ctl.length, table(controlHeads, controls)) : ""}
     ${cues ? sec("cue", "Cue sheet (turn by turn)", cue.length, table(cueHeads, cues)) : (route === null ? '<p class="note">Controls and cue sheet are not on Audax yet.</p>' : "")}`;
 
@@ -415,6 +424,7 @@ async function showEvent(id, force) {
   }
   await fetchRoute(id, force);
   await fetchCrossings(id, true);               // control times and rider marks change during a ride, so always ask again
+  await fetchProgress(id);
   if (current !== id) return;
   renderTiles(); renderDetail();
 }
@@ -639,10 +649,10 @@ const trackMsg = (code, name) => `Hello${name ? " " + name.split(" ")[0] : ""}! 
 2) In the app set:
    Device identifier: ${code}
    Server URL: ${API_BASE}/track
-   Frequency: ${API_BASE.includes("-staging") ? "30 (seconds, for this staging test)" : "600 (seconds, which is every 10 minutes)"}
+   Frequency: ${API_BASE.includes("-staging") ? "30 (seconds, for this staging test)" : "120 (seconds, about every 2 minutes)"}
 3) Allow location "Always" (on Android also allow background use and no battery limit).
-4) Switch tracking ON before the start and OFF after you finish.
-Only the organising team can see your location. Staging test positions go to the isolated staging database.`;
+4) Switch tracking ON before the start. The server begins saving positions after the team records your start at CP1; it stops after the final control or if the team marks DNS/DNF.
+Only the organising team can see your exact location. Approximate GPS km is shown on the public ride page. ${API_BASE.includes("-staging") ? "Staging test data goes to the isolated staging database." : "Location records are kept for up to 30 days."}`;
 
 function storeTeam(j) { localStorage.setItem(TEAM_KEY, JSON.stringify({ email: j.email, role: j.role, token: j.token, exp: Date.now() + 11.5 * 3600e3 })); }
 function renderLogin(msg = "") {
@@ -828,13 +838,13 @@ async function renderTrackAdmin() {
     return `<div class="trow"><div class="tname"><b>${esc(r.name)}</b><small>AIR ${esc(r.air)}</small></div><div class="tact">
       ${c ? `<code class="code">${esc(c.token)}</code><button type="button" class="linkbtn" data-team="copy" data-code="${esc(c.token)}" data-name="${esc(r.name)}">Copy message</button>`
           : `<button type="button" class="btn alt" data-team="code" data-air="${esc(r.air)}" data-name="${esc(r.name)}">Make code</button>`}
-      ${p ? `<button type="button" class="linkbtn" data-team="pick" data-air="${esc(r.air)}">${esc(ago(p.ts))}${p.batt != null ? `, battery ${Math.round(p.batt)}%` : ""}</button>` : (c ? '<span class="chip load">No signal yet</span>' : "")}
+      ${p ? `<button type="button" class="linkbtn" data-team="pick" data-air="${esc(r.air)}">~${esc(km2(p.km))} km · ${esc(ago(p.ts))}${p.batt != null ? `, battery ${Math.round(p.batt)}%` : ""}</button>` : (c ? '<span class="chip load">No signal yet</span>' : "")}
       ${quiet ? '<span class="chip closed">Silent over 30 min</span>' : ""}</div></div>`;
   }).join("");
   const sel = desk.sel && posOf(desk.sel);
-  body.innerHTML = `<p class="note">Riders who agree to be tracked get a personal code. Their location is only kept while they are registered for a ride that is on, and only the team can see it.</p>
+  body.innerHTML = `<p class="note">GPS starts after the team records CP1 and stops after the final control, DNS, or DNF. Exact locations are visible to the team; the public board shows only approximate GPS km.</p>
     ${sel ? `<div class="tmap"><iframe class="map" title="Rider location" src="https://www.google.com/maps?q=${sel.lat},${sel.lon}&z=15&output=embed"></iframe>
-      <p class="note">Last seen ${esc(ago(sel.ts))}${sel.speed != null ? `, ${Math.round(sel.speed)} km/h` : ""}. <a href="https://www.google.com/maps?q=${sel.lat},${sel.lon}" target="_blank" rel="noopener">Open in Google Maps</a></p></div>` : ""}
+      <p class="note">About ${esc(km2(sel.km))} km by GPS · last seen ${esc(ago(sel.ts))}${sel.speed != null ? `, ${Math.round(sel.speed)} km/h` : ""}. <a href="https://www.google.com/maps?q=${sel.lat},${sel.lon}" target="_blank" rel="noopener">Open in Google Maps</a></p></div>` : ""}
     <div class="trows">${rows || '<p class="note">No registered riders yet.</p>'}</div>`;
   teamTimer = setInterval(() => { if (current === "team" && desk.tab === "track" && document.activeElement?.tagName !== "INPUT") renderTeam(); }, 60000);
 }
@@ -928,6 +938,7 @@ setInterval(async () => {                 // while a ride is on, check for new c
   const r = rides.find(x => x.id === current);
   if (!r || rideStatus(r).k !== "ongoing") return;
   await fetchCrossings(current, true);
+  await fetchProgress(current);
   renderDetail();
 }, 60 * 1000);
 
