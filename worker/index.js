@@ -1,4 +1,4 @@
-// SR BRM API - Cloudflare Worker
+/  / SR BRM API - Cloudflare Worker
 //   GET /calendar       your club's rides from the Audax calendars (2025, 2026, 2027), with the event id when the ride has a page
 //   GET /ev/:id         one event page: details, ride name, riders, route-map link, route-card ids
 //   GET /rt/:id         official route card (View route): controls + cue sheet
