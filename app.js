@@ -56,7 +56,7 @@ const fmtTime = t => {
   return t.replace(/(\d{1,2}):(\d{2})/, (_, h, m) => `${String(+h % 12 || 12).padStart(2, "0")}:${m} ${+h >= 12 ? "PM" : "AM"}`);
 };
 const loading = msg => `<p class="note">${esc(msg)}</p>`;
-const LABELS = { registered: "Registered", ytc: "Yet to confirm", dns: "Did not start",
+const LABELS = { registered: "Registered", riding: "Riding", waiting: "Not checked in", ytc: "Yet to confirm", dns: "Did not start",
                  dnf: "Did not finish", lf: "Late finish", finished: "Finished" };
 
 function statusOf(r, started = true) {
@@ -104,6 +104,14 @@ function progressOf(r) {                  // how much of the time limit is used,
   const total = (end - start) / 3600e3;
   return { pct: Math.min(100, Math.max(0, Math.round(((now - start) / (end - start)) * 100))),
            text: `${h}h ${pad2(m)}m left of the ${Number.isInteger(total) ? total : total.toFixed(1)}-hour limit` };
+}
+function riderStatus(r, ride, ev) {
+  const base = statusOf(r, hasStarted(ev));                              // Audax's own picture
+  if (!ride || rideStatus(ride).k !== "ongoing") return base;             // before the start and after the ride, Audax stands
+  if (!["dns", "registered"].includes(base)) return base;                 // Audax already has a real result for this rider
+  const mark = (markCache[ev.id] || []).find(m => sameAir(m.air, r.air));
+  if (mark) return mark.mark;                                             // set by the team: "dns" or "dnf"
+  return (crossCache[ev.id] || []).some(x => sameAir(x.air, r.air)) ? "riding" : "waiting";
 }
 const finishedCount = ev => (ev.riders || []).filter(x => ["finished", "lf"].includes(statusOf(x, true))).length;
 
@@ -182,10 +190,10 @@ async function api(path, body) {          // talks to the Worker; sends the team
   if (!res.ok) throw new Error(j.error || "Server returned " + res.status);
   return j;
 }
-const crossCache = {};
+const crossCache = {}, markCache = {};
 async function fetchCrossings(id, force) {
   if (!force && crossCache[id]) return crossCache[id];
-  try { crossCache[id] = (await api(`/crossings/${id}`)).crossings || []; } catch (_) { crossCache[id] = crossCache[id] || []; }
+  try { const j = await api(`/crossings/${id}`); crossCache[id] = j.crossings || []; markCache[id] = j.marks || []; } catch (_) { crossCache[id] = crossCache[id] || []; }
   return crossCache[id];
 }
 const sameAir = (a, b) => String(a).trim().replace(/^0+/, "") === String(b).trim().replace(/^0+/, "");
@@ -288,9 +296,10 @@ function renderDetail() {
   const dateStr = `${f.wd} ${f.d} ${MON[f.m - 1]} ${f.y}`;
   const riders = ev.riders || [];
   const started = hasStarted(ev);
-  const count = k => riders.filter(r => statusOf(r, started) === k).length;
+  const count = k => riders.filter(r => riderStatus(r, ride, ev) === k).length;
   const paid = riders.filter(r => /^y/i.test(r.fee)).length;
   const stats = [["Registered", riders.length], ["Fee paid", paid], ["Finished", count("finished") + count("lf")],
+                 ...(status.k === "ongoing" ? [["Riding", count("riding")], ["Not checked in", count("waiting")]] : []),
                  ["Did not start", count("dns")], ["Did not finish", count("dnf")]]
     .map(([l, n]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join("");
   const prog = status.k === "ongoing" ? progressOf(ride) : null;
@@ -351,7 +360,7 @@ function renderDetail() {
       <div class="tools">
         <input id="q" type="search" placeholder="Search name, AIR number or club" aria-label="Search riders" value="${esc(query)}">
         <select id="f" aria-label="Filter by status">
-          ${["all", "registered", "finished", "lf", "ytc", "dns", "dnf"].map(k =>
+          ${["all", "registered", "riding", "waiting", "finished", "lf", "ytc", "dns", "dnf"].map(k =>
             `<option value="${k}" ${k === filter ? "selected" : ""}>${k === "all" ? "All riders" : LABELS[k]}</option>`).join("")}
         </select>
         <span class="meta" id="meta"></span>
@@ -373,12 +382,12 @@ function renderDetail() {
 function renderRows() {
   const ev = cache[current]; if (!ev) return;
   const q = query.trim().toLowerCase();
-  const started = hasStarted(ev);
-  const list = ev.riders.filter(r => (filter === "all" || statusOf(r, started) === filter) &&
+  const ride = rides.find(x => x.id === current);
+  const list = ev.riders.filter(r => (filter === "all" || riderStatus(r, ride, ev) === filter) &&
     (!q || [r.name, r.air, r.club].some(v => (v || "").toLowerCase().includes(q))));
   document.getElementById("rows").innerHTML = list.length ? list.map(r => {
-    const s = statusOf(r, started), label = LABELS[s];
-    const res = (r.result || "").trim();   // exactly what Audax shows in its Result column
+    const s = riderStatus(r, ride, ev), label = LABELS[s], raw = (r.result || "").trim();
+    const res = ride && rideStatus(ride).k === "ongoing" && s !== "dns" && raw.toUpperCase() === "DNS" ? "" : raw;   // Audax's own Result, except its "DNS" placeholder during the ride
     return `<tr><td>${esc(r.seq)}</td><td>${esc(r.name)}</td><td>${esc(r.air)}</td><td>${esc(r.club)}</td>
       <td>${esc(r.fee)}</td><td>${esc(r.medal)}</td><td class="res">${esc(res)}</td><td><span class="tag ${s}">${esc(label)}</span></td></tr>`;
   }).join("") : `<tr><td colspan="8" class="note">No riders match. Clear the search or choose "All riders".</td></tr>`;
@@ -401,7 +410,7 @@ async function showEvent(id, force) {
     return;
   }
   await fetchRoute(id, force);
-  await fetchCrossings(id, force);
+  await fetchCrossings(id, true);               // control times and rider marks change during a ride, so always ask again
   if (current !== id) return;
   renderTiles(); renderDetail();
 }
@@ -610,7 +619,7 @@ async function ask() {
 }
 
 // ---------- team area (hidden address: #team) ----------
-let desk = { tab: "desk", ride: "", control: "", q: "", sel: "" };
+let desk = { tab: "desk", ride: "", control: "", q: "", sel: "", mode: "type", extra: [] };
 let teamTimer = null;
 const tripLabel = r => { const f = dateParts(r.date); return `${f.wd} ${f.d} ${MON[f.m - 1]}, ${kmLabel(r.distance)}`; };
 const clockNow = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(11, 16);
@@ -672,37 +681,97 @@ async function renderTeam() {
   }
 }
 
+// A time as typed in a grid cell: "1432", "14:32", "932" or "D2 0310" (second day). Without a day it means the latest such time that is not in the future.
+const tstr = (ts, rideDate) => {
+  const d = new Date(ts + 5.5 * 3600e3), day = Math.round((Date.parse(d.toISOString().slice(0, 10)) - Date.parse(rideDate)) / 864e5) + 1;
+  return (day > 1 ? `D${day} ` : "") + d.toISOString().slice(11, 16);
+};
+function parseCell(text, rideDate, startMs) {
+  let t = String(text).trim().toLowerCase(), dayN = 0;
+  const dm = t.match(/^d\s*(\d)\s*/);
+  if (dm) { dayN = Number(dm[1]); t = t.slice(dm[0].length); }
+  const m = t.match(/^(\d{1,2})[:.]?(\d{2})$/);
+  if (!m || +m[1] > 23 || +m[2] > 59) throw new Error('Type the time like 1432 or 14:32. For the second day add D2, like D2 0310.');
+  let ts = dayN ? Date.parse(`${rideDate}T${pad2(m[1])}:${m[2]}:00+05:30`) + (dayN - 1) * 864e5 : Date.parse(`${todayIST()}T${pad2(m[1])}:${m[2]}:00+05:30`);
+  if (!dayN && ts > Date.now() + 10 * 60e3) ts -= 864e5;
+  if (ts < startMs - 3 * 3600e3) throw new Error("That time is before the ride started. For the second day type D2 first, like D2 0310.");
+  return ts;
+}
+
 function renderDesk() {
   const body = document.getElementById("deskBody");
   if (!body || current !== "team") return;
-  const ev = cache[desk.ride], route = routeCache[desk.ride], ride = rides.find(r => r.id === desk.ride) || { date: todayIST() };
-  const ctl = route?.controls || [], cr = crossCache[desk.ride] || [];
+  const ev = cache[desk.ride], route = routeCache[desk.ride], ride = rides.find(r => r.id === desk.ride) || { id: desk.ride, date: todayIST() };
+  const ctl = route?.controls || [], cr = crossCache[desk.ride] || [], marks = markCache[desk.ride] || [];
   if (!ctl.length) { body.innerHTML = `<p class="error">This ride's controls are not available from Audax yet, so times can't be recorded.</p>`; return; }
-  if (!ctl.some((c, i) => String(cno(c, i)) === desk.control)) desk.control = String(cno(ctl[0], 0));
-  const ci = ctl.findIndex((c, i) => String(cno(c, i)) === desk.control), c = ctl[ci];
+  const markOf = air => marks.find(m => sameAir(m.air, air));
+  const riders = (ev?.riders || []).map(r => ({ air: r.air, name: r.name }));
+  for (const a of [...cr.map(x => x.air), ...desk.extra]) if (!riders.some(r => sameAir(r.air, a))) riders.push({ air: a, name: `AIR ${a}` });   // riders not on the Audax list
   const q = desk.q.trim().toLowerCase();
-  const list = (ev?.riders || []).filter(r => !q || `${r.name} ${r.air}`.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name));
-  const rec = air => cr.find(x => Number(x.no) === Number(desk.control) && sameAir(x.air, air));
-  const reachedLater = air => cr.some(x => sameAir(x.air, air) && Number(x.no) > Number(desk.control));
-  const cut = closeMs(c, ride.date);
-  const rows = list.map(r => {
-    const x = rec(r.air), late = !x && cut && Date.now() > cut && !reachedLater(r.air);    // not here yet and past this control's closing time
-    return `<div class="trow"><div class="tname"><b>${esc(r.name)}</b><small>AIR ${esc(r.air)}, ${esc(r.club)}</small></div><div class="tact">${
-      x ? `<span class="chip done">${esc(clockOf(x.ts, ride.date))}</span><button type="button" class="linkbtn" data-team="undo" data-id="${x.id}">Undo</button>`
-        : `${late ? '<span class="chip closed">Past closing time</span>' : ""}<button type="button" class="btn" data-team="now" data-air="${esc(r.air)}">Now</button><button type="button" class="btn alt" data-team="time" data-air="${esc(r.air)}">Set time</button>`}</div></div>`;
+  const list = riders.filter(r => !q || `${r.name} ${r.air}`.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name));
+  const closes = ctl.map(c => closeMs(c, ride.date));
+  const head = `<div class="th rname">Rider</div>` + ctl.map((c, i) => `<div class="th" title="${esc(c.location)}">CP${i + 1}<small>${esc(String(Number(c.km) || 0))} km</small></div>`).join("") + `<div class="th">Status</div>`;
+  const rows = list.map((r, ri) => {
+    const alt = ri % 2 ? " alt" : "", mk = markOf(r.air), air = esc(r.air);
+    const maxNo = Math.max(0, ...cr.filter(x => sameAir(x.air, r.air)).map(x => Number(x.no)));
+    const cells = ctl.map((c, i) => {
+      const no = cno(c, i), x = cr.find(y => Number(y.no) === no && sameAir(y.air, r.air));
+      const late = !x && !mk && closes[i] && Date.now() > closes[i] && maxNo < no;          // not here yet and past this control's closing time
+      return `<input class="tcell${alt}${late ? " late" : ""}${mk ? " off" : ""}" data-air="${air}" data-no="${no}" value="${x ? tstr(x.ts, ride.date) : ""}"
+        autocomplete="off" autocapitalize="off" spellcheck="false" ${desk.mode === "stamp" ? "readonly" : ""} aria-label="${esc(r.name)}, CP${i + 1}">`;
+    }).join("");
+    return `<div class="tcellname${alt}"><b>${esc(r.name)}</b><small>${air}</small></div>${cells}
+      <select class="tmark${alt}" data-air="${air}" aria-label="Status of ${esc(r.name)}"><option value="">Riding</option>
+      <option value="dns" ${mk?.mark === "dns" ? "selected" : ""}>Did not start</option><option value="dnf" ${mk?.mark === "dnf" ? "selected" : ""}>Did not finish</option></select>`;
   }).join("");
-  const done = cr.filter(x => Number(x.no) === Number(desk.control)).length;
-  body.innerHTML = `<div class="tools"><select id="deskControl" aria-label="Control">${ctl.map((k, i) =>
-      `<option value="${cno(k, i)}" ${i === ci ? "selected" : ""}>${esc(km2(k.km))} km, ${esc(k.location)}${k.close ? ` (closes ${esc(fmtTime(k.close.replace(/^D\d\s*/, "")))})` : ""}</option>`).join("")}</select></div>
-    <p class="note">Tap <b>Now</b> when a rider reaches this control, or <b>Set time</b> if you are entering it later. ${done} of ${(ev?.riders || []).length} riders recorded here.</p>
-    <div class="tools"><input id="deskQ" type="search" placeholder="Search name or AIR number" value="${esc(desk.q)}" aria-label="Search riders"></div>
-    <div class="trows">${rows || '<p class="note">No riders match.</p>'}</div>
-    <div class="tools"><input id="deskOther" placeholder="Other AIR number" aria-label="Other AIR number"><button type="button" class="btn alt" data-team="other">Record now</button></div>`;
-  document.getElementById("deskControl").addEventListener("change", e => { desk.control = e.target.value; renderDesk(); });
+  const keep = body.querySelector(".tgridwrap"), sl = keep?.scrollLeft || 0, st = keep?.scrollTop || 0;
+  body.innerHTML = `<div class="tmodes">
+      <button type="button" class="subbtn" data-team="mode" data-mode="type" aria-pressed="${desk.mode === "type"}">Type times</button>
+      <button type="button" class="subbtn" data-team="mode" data-mode="stamp" aria-pressed="${desk.mode === "stamp"}">Tap to stamp now</button>
+      <button type="button" class="btn alt" data-team="startall">Start everyone</button></div>
+    <details class="inner"><summary>How to use this, and what CP1, CP2 mean</summary>
+      <p class="note">${desk.mode === "stamp"
+        ? "Tap an empty cell to record the time right now. Switch to <b>Type times</b> to correct or clear a cell."
+        : "Type a time in a rider's cell and press Enter: <b>1432</b>, <b>14:32</b>, or <b>D2 0310</b> for the second day. Empty a cell to remove its time. Red cells: the rider is not at that control by its closing time."}</p>
+      <ol class="cplist">${ctl.map((c, i) => `<li><b>CP${i + 1}</b> ${esc(c.location)}, ${esc(km2(c.km))} km${c.close ? `, closes ${esc(fmtTime(c.close.replace(/^D\d\s*/, "")))}` : ""}</li>`).join("")}</ol></details>
+    <div class="tools"><input id="deskQ" type="search" placeholder="Search name or AIR number" value="${esc(desk.q)}" aria-label="Search riders">
+      <input id="deskOther" placeholder="Add a rider by AIR number" aria-label="Add a rider by AIR number"><button type="button" class="btn alt" data-team="other">Add row</button></div>
+    <div class="tgridwrap"><div class="tgrid" style="--n:${ctl.length}">${head}${rows || ""}</div></div>
+    ${rows ? "" : '<p class="note">No riders match.</p>'}`;
+  const wrap = body.querySelector(".tgridwrap"); wrap.scrollLeft = sl; wrap.scrollTop = st;
   document.getElementById("deskQ").addEventListener("input", e => {
     desk.q = e.target.value; renderDesk();
     const el = document.getElementById("deskQ"); el.focus(); el.setSelectionRange(el.value.length, el.value.length);
   });
+}
+
+async function saveCell(el) {
+  const air = el.dataset.air, no = Number(el.dataset.no), text = el.value.trim();
+  const ride = rides.find(r => r.id === desk.ride) || { id: desk.ride, date: todayIST() };
+  const prev = (crossCache[desk.ride] || []).find(x => Number(x.no) === no && sameAir(x.air, air));
+  try {
+    if (!text) { if (prev) await api("/team/crossing/delete", { id: prev.id }); }
+    else {
+      const ts = parseCell(text, ride.date, rideWindow(ride)[0]);
+      if (prev && prev.ts === ts) { el.value = tstr(ts, ride.date); return; }
+      await api("/team/crossing", { rideId: desk.ride, controlNo: no, air, ts });
+    }
+    await fetchCrossings(desk.ride, true);
+    const now = (crossCache[desk.ride] || []).find(x => Number(x.no) === no && sameAir(x.air, air));
+    el.value = now ? tstr(now.ts, ride.date) : "";
+    el.classList.remove("late", "off");
+    const sel = [...detailEl.querySelectorAll("select.tmark")].find(x => x.dataset.air === air);        // recording a time clears a "did not start" mark
+    if (sel && !(markCache[desk.ride] || []).some(m => sameAir(m.air, air))) sel.value = "";
+    el.classList.add("saved"); setTimeout(() => el.classList.remove("saved"), 900);
+  } catch (err) {
+    el.value = prev ? tstr(prev.ts, ride.date) : "";
+    alert(err.message);
+  }
+}
+async function setMark(sel) {
+  try { await api("/team/mark", { rideId: desk.ride, air: sel.dataset.air, mark: sel.value || "clear" }); await fetchCrossings(desk.ride, true); }
+  catch (err) { alert(err.message); }
+  renderDesk();
 }
 
 async function renderTrackAdmin() {
@@ -728,26 +797,48 @@ async function renderTrackAdmin() {
   teamTimer = setInterval(() => { if (current === "team" && desk.tab === "track" && document.activeElement?.tagName !== "INPUT") renderTeam(); }, 60000);
 }
 
-async function record(air, ts) {
-  await api("/team/crossing", { rideId: desk.ride, controlNo: Number(desk.control), air, ts });
-  await fetchCrossings(desk.ride, true);
-  renderDesk();
-}
 detailEl.addEventListener("click", async e => {
+  const cell = e.target.closest("input.tcell");
+  if (cell && desk.mode === "stamp") {                                   // stamp mode: tapping an empty cell records the time now
+    if (!cell.value) { cell.value = tstr(Date.now(), (rides.find(r => r.id === desk.ride) || { date: todayIST() }).date); await saveCell(cell); }
+    return;
+  }
   const t = e.target.closest("[data-team]");
   if (!t) return;
   const act = t.dataset.team, air = t.dataset.air;
   try {
     if (act === "signout") { localStorage.removeItem(TEAM_KEY); renderTeam(); }
     else if (act === "tab") { desk.tab = t.dataset.tab; renderTeam(); }
-    else if (act === "now") await record(air);
-    else if (act === "time") { const v = prompt("Time at this control (24-hour, like 14:35)", clockNow()); if (v) await record(air, parseClock(v)); }
-    else if (act === "other") { const v = document.getElementById("deskOther").value.trim(); if (v) await record(v); }
-    else if (act === "undo") { await api("/team/crossing/delete", { id: Number(t.dataset.id) }); await fetchCrossings(desk.ride, true); renderDesk(); }
+    else if (act === "mode") { desk.mode = t.dataset.mode; renderDesk(); }
+    else if (act === "other") { const v = document.getElementById("deskOther").value.trim(); if (v) { desk.extra.push(v); renderDesk(); } }
+    else if (act === "startall") {
+      const ctl = routeCache[desk.ride]?.controls || [], no = cno(ctl[0], 0), ride = rides.find(r => r.id === desk.ride) || { date: todayIST() };
+      const cr = crossCache[desk.ride] || [], marks = markCache[desk.ride] || [];
+      const todo = (cache[desk.ride]?.riders || []).filter(r => !cr.some(x => Number(x.no) === no && sameAir(x.air, r.air)) && !marks.some(m => sameAir(m.air, r.air)));
+      if (!todo.length) { alert("Everyone already has a start time or a status."); return; }
+      const dflt = hasStarted(cache[desk.ride]) ? (cache[desk.ride].startTime.match(/\d{1,2}:\d{2}/) || [clockNow()])[0] : clockNow();
+      const v = prompt(`Start time for the ${todo.length} riders without a start time or status (24-hour, like 06:00). Mark anyone who did not start first.`, dflt);
+      if (v) {
+        const ts = parseCell(v, ride.date, rideWindow(ride)[0]);
+        for (let k = 0; k < todo.length; k += 5) await Promise.all(todo.slice(k, k + 5).map(r => api("/team/crossing", { rideId: desk.ride, controlNo: no, air: r.air, ts })));
+        await fetchCrossings(desk.ride, true); renderDesk();
+      }
+    }
     else if (act === "code") { await api("/team/codes", { air, name: t.dataset.name }); renderTeam(); }
     else if (act === "copy") { await navigator.clipboard.writeText(trackMsg(t.dataset.code, t.dataset.name)); t.textContent = "Copied. Paste it into WhatsApp"; }
     else if (act === "pick") { desk.sel = air; renderTeam(); }
   } catch (err) { alert(err.message); }
+});
+detailEl.addEventListener("change", e => {
+  if (e.target.matches("input.tcell") && desk.mode !== "stamp") saveCell(e.target);
+  else if (e.target.matches("select.tmark")) setMark(e.target);
+});
+detailEl.addEventListener("keydown", e => {                              // Enter saves and moves down to the next rider in the same column
+  if (e.key !== "Enter" || !e.target.matches("input.tcell")) return;
+  e.preventDefault();
+  const col = [...detailEl.querySelectorAll(`input.tcell[data-no="${e.target.dataset.no}"]`)], next = col[col.indexOf(e.target) + 1];
+  e.target.blur();
+  if (next) next.focus();
 });
 
 // ---------- routing and refresh ----------
