@@ -5,6 +5,11 @@ main = "index.js"
 compatibility_date = "2026-11-02"
 workers_dev = true
 
+[vars]
+APP_ORIGIN = "https://staging.sr-brm-v3.pages.dev"
+MAIL_FROM = "SR BRM Team <team@YOUR_VERIFIED_SENDING_DOMAIN>"
+BOOTSTRAP_ADMIN_EMAIL = "REPLACE_WITH_OWNER_EMAIL"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "sr-brm-staging"

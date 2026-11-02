@@ -4,9 +4,9 @@
 //   GET /rt/:id         official route card (View route): controls + cue sheet
 //   GET /event/:dist and /route/:dist   old addresses for this week's 200/300/400/600 (kept so nothing breaks)
 //   GET /crossings/:id   control times recorded by the team (public, read only)
-//   /team/...            team sign-in, recording control times, tracking codes, live positions (PIN protected)
+//   /team/...            account sign-in, user administration, control times and live positions
 //   /track               receives locations from the Traccar Client app (only kept for registered riders during their ride)
-// Team features need: a D1 database bound as "DB" and a secret named TEAM_PINS (like  Preetham:482913,Ravi:775310 ).
+// Team features need a D1 database, Resend API secret and configured first-admin email.
 
 const SOURCE = "https://www.audaxindia.in";
 const CLUB = "Secunderabad Randonneurs";
@@ -277,24 +277,25 @@ const getCalendar = ctx => cached("calendar-v1", d => (d.errors.length ? 120 : C
 const LIMIT_H = { "100": 7.5, "150": 10.5, "200": 13.5, "300": 20, "400": 27, "600": 40, "1000": 75, "1200": 90, Fleche: 24 };   // time limit in hours
 const enc = new TextEncoder();
 const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-const same = (a, b) => a.length === b.length && [...a].reduce((x, c, i) => x | (c.charCodeAt(0) ^ b.charCodeAt(i)), 0) === 0;   // constant-time compare
+const unb64u = s => { s = String(s); return Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((4 - s.length % 4) % 4)), c => c.charCodeAt(0)); };
+const same = (a, b) => { a = String(a); b = String(b); let x = a.length ^ b.length; for (let i = 0; i < Math.max(a.length, b.length); i++) x |= (a.charCodeAt(i % (a.length || 1)) || 0) ^ (b.charCodeAt(i % (b.length || 1)) || 0); return x === 0; };
 const sameAir = (a, b) => String(a).trim().replace(/^0+/, "") === String(b).trim().replace(/^0+/, "");
 const validAir = a => /^[0-9A-Za-z-]{1,12}$/.test(a);
 const newCode = () => { const a = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; return [...crypto.getRandomValues(new Uint8Array(8))].map(x => a[x % a.length]).join(""); };
-const teamList = env => String(env.TEAM_PINS || "").split(",").map(x => x.trim()).filter(Boolean)
-  .map(x => { const i = x.indexOf(":"); return i > 0 ? { name: x.slice(0, i).trim(), pin: x.slice(i + 1).trim() } : null; }).filter(Boolean);
-async function sign(env, text) {
-  const key = await crypto.subtle.importKey("raw", enc.encode(String(env.TEAM_PINS)), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return b64u(await crypto.subtle.sign("HMAC", key, enc.encode(text)));
-}
-async function makeToken(env, name) {
-  const body = `${encodeURIComponent(name)}.${Date.now() + 12 * 3600e3}`;          // valid for 12 hours; changing TEAM_PINS signs everyone out
-  return `${body}.${await sign(env, body)}`;
+const normEmail = s => String(s || "").trim().toLowerCase();
+const randomToken = () => b64u(crypto.getRandomValues(new Uint8Array(32)));
+const hash = async s => b64u(await crypto.subtle.digest("SHA-256", enc.encode(s)));
+async function passwordHash(password, salt) {
+  const key = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
+  return b64u(await crypto.subtle.deriveBits({ name: "PBKDF2", salt: unb64u(salt), iterations: 150000, hash: "SHA-256" }, key, 256));
 }
 async function whoIs(request, env) {
-  const [n, exp, sig] = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").split(".");
-  if (!sig || !env.TEAM_PINS || Number(exp) < Date.now()) return null;
-  return same(await sign(env, `${n}.${exp}`), sig) ? decodeURIComponent(n) : null;
+  const token = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+  if (!token || !env.DB) return null;
+  const d = await db(env), digest = await hash(token);
+  const row = await d.prepare("SELECT u.email, u.role, u.status FROM team_sessions s JOIN team_users u ON u.email=s.email WHERE s.token_hash=? AND s.expires>? AND u.status='active'")
+    .bind(digest, Date.now()).first();
+  return row || null;
 }
 
 let dbReady = false;
@@ -309,6 +310,11 @@ async function db(env) {                  // the tables are created automaticall
       q("CREATE TABLE IF NOT EXISTS positions (id INTEGER PRIMARY KEY AUTOINCREMENT, ride_id TEXT NOT NULL, air TEXT NOT NULL, ts INTEGER NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL, speed REAL, batt REAL)"),
       q("CREATE INDEX IF NOT EXISTS idx_positions_ride ON positions (ride_id, air, ts)"),
       q("CREATE TABLE IF NOT EXISTS login_fails (ip TEXT NOT NULL, ts INTEGER NOT NULL)"),
+      q("CREATE TABLE IF NOT EXISTS team_users (email TEXT PRIMARY KEY, role TEXT NOT NULL, status TEXT NOT NULL, salt TEXT, password_hash TEXT, created_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)"),
+      q("CREATE TABLE IF NOT EXISTS team_auth_tokens (token_hash TEXT PRIMARY KEY, email TEXT NOT NULL, kind TEXT NOT NULL, expires INTEGER NOT NULL, created_by TEXT, created_at INTEGER NOT NULL)"),
+      q("CREATE INDEX IF NOT EXISTS idx_team_auth_email ON team_auth_tokens (email, kind)"),
+      q("CREATE TABLE IF NOT EXISTS team_sessions (token_hash TEXT PRIMARY KEY, email TEXT NOT NULL, expires INTEGER NOT NULL, created_at INTEGER NOT NULL)"),
+      q("CREATE INDEX IF NOT EXISTS idx_team_sessions_email ON team_sessions (email)"),
       q("CREATE TABLE IF NOT EXISTS rider_marks (id INTEGER PRIMARY KEY AUTOINCREMENT, ride_id TEXT NOT NULL, air TEXT NOT NULL, mark TEXT NOT NULL, ts INTEGER NOT NULL, entered_by TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0)"),
       q("CREATE INDEX IF NOT EXISTS idx_marks_ride ON rider_marks (ride_id, deleted)")
     ]);
@@ -332,28 +338,121 @@ async function handleCrossings(request, env, rideId) {
 }
 
 async function handleTeam(request, env, b, c) {
-  if (!env.TEAM_PINS) return json(request, { error: "Team sign-in is not set up yet (the TEAM_PINS secret is missing)." }, 503);
   const d = await db(env);
   if (!d) return json(request, { error: "The database is not connected to the Worker yet." }, 503);
   const post = request.method === "POST";
   const body = post ? await request.json().catch(() => ({})) : {};
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  const blocked = async () => { const r = await d.prepare("SELECT COUNT(*) AS n FROM login_fails WHERE ip=? AND ts>?").bind(ip, Date.now() - 15 * 60e3).first(); return r && r.n >= 8; };
 
-  if (b === "login") {
+  const sendMail = async (to, subject, token, kind) => {
+    if (!env.RESEND_API_KEY || !env.MAIL_FROM || !env.APP_ORIGIN) throw new Error("Email delivery is not configured yet.");
+    const link = `${String(env.APP_ORIGIN).replace(/\/$/, "")}/#team?${kind}=${encodeURIComponent(token)}`;
+    const action = kind === "invite" ? "Set up your SR BRM team account" : "Reset your SR BRM password";
+    const result = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: env.MAIL_FROM, to: [to], subject, html: `<p>${action}</p><p><a href="${link}">${kind === "invite" ? "Set password" : "Reset password"}</a></p><p>This link expires in 60 minutes and can only be used once.</p>` }) });
+    if (!result.ok) throw new Error("The email service could not send the message.");
+  };
+  const issueMail = async (email, kind, who) => {
+    const raw = randomToken(), expires = Date.now() + 3600e3;
+    await d.prepare("DELETE FROM team_auth_tokens WHERE email=? AND kind=?").bind(email, kind).run();
+    await d.prepare("INSERT INTO team_auth_tokens (token_hash,email,kind,expires,created_by,created_at) VALUES (?,?,?,?,?,?)").bind(await hash(raw), email, kind, expires, who?.email || null, Date.now()).run();
+    try { await sendMail(email, kind === "invite" ? "Your SR BRM team invitation" : "Reset your SR BRM password", raw, kind); }
+    catch (err) { await d.prepare("DELETE FROM team_auth_tokens WHERE token_hash=?").bind(await hash(raw)).run(); throw err; }
+  };
+  if (b === "bootstrap" && post) {
+    if (await blocked()) return json(request, { error: "Too many requests. Try again in 15 minutes." }, 429);
+    await d.prepare("INSERT INTO login_fails (ip,ts) VALUES (?,?)").bind(ip,Date.now()).run();
+    if (await d.prepare("SELECT COUNT(*) AS n FROM team_users WHERE status='active'").first().then(x => x.n)) return json(request, { error: "Initial setup is already complete." }, 409);
+    const email = normEmail(env.BOOTSTRAP_ADMIN_EMAIL);
+    if (!email || normEmail(body.email) !== email) return json(request, { error: "This email is not configured as the initial administrator." }, 403);
+    await d.prepare("INSERT OR IGNORE INTO team_users (email,role,status,created_at,updated_at) VALUES (?,'admin','invited',?,?)").bind(email, Date.now(), Date.now()).run();
+    try { await issueMail(email, "invite", null); } catch (err) { return json(request, { error: err.message }, 503); }
+    return json(request, { ok: true, message: "Check your email for the account setup link." });
+  }
+  if (b === "login" && post) {
     if (!post) return json(request, { error: "Method not allowed" }, 405);
     const ip = request.headers.get("CF-Connecting-IP") || "unknown";
     const recent = await d.prepare("SELECT COUNT(*) AS n FROM login_fails WHERE ip = ? AND ts > ?").bind(ip, Date.now() - 15 * 60e3).first();
-    if (recent && recent.n >= 8) return json(request, { error: "Too many wrong PINs. Try again in 15 minutes." }, 429);
-    const person = teamList(env).find(p => same(p.pin, String(body.pin || "").trim()));
-    if (!person) {
+    if (recent && recent.n >= 8) return json(request, { error: "Too many failed attempts. Try again in 15 minutes." }, 429);
+    const email = normEmail(body.email), password = String(body.password || ""), person = email.length <= 254 ? await d.prepare("SELECT email,role,status,salt,password_hash FROM team_users WHERE email=?").bind(email).first() : null;
+    const candidate = await passwordHash(password.length <= 200 ? password : "", person?.salt || "AAAAAAAAAAAAAAAAAAAAAA");
+    if (!person || person.status !== "active" || !same(candidate, person.password_hash || "")) {
       await d.prepare("INSERT INTO login_fails (ip, ts) VALUES (?, ?)").bind(ip, Date.now()).run();
-      return json(request, { error: "Wrong PIN" }, 401);
+      return json(request, { error: "Email or password is incorrect." }, 401);
     }
-    return json(request, { name: person.name, token: await makeToken(env, person.name) });
+    const token = randomToken();
+    await d.prepare("DELETE FROM team_sessions WHERE expires<=?").bind(Date.now()).run();
+    await d.prepare("INSERT INTO team_sessions (token_hash,email,expires,created_at) VALUES (?,?,?,?)").bind(await hash(token), email, Date.now() + 12 * 3600e3, Date.now()).run();
+    return json(request, { email, role: person.role, token });
+  }
+
+  if ((b === "activate" || b === "reset") && post) {
+    const raw = String(body.token || ""), row = await d.prepare("SELECT token_hash,email,kind,expires FROM team_auth_tokens WHERE token_hash=? AND kind=? AND expires>?").bind(await hash(raw), b === "activate" ? "invite" : "reset", Date.now()).first();
+    const password = String(body.password || "");
+    if (!row) return json(request, { error: "This link is invalid or expired. Ask an administrator for a new one." }, 400);
+    if (password.length < 12 || password.length > 200) return json(request, { error: "Use a password between 12 and 200 characters." }, 400);
+    const salt = b64u(crypto.getRandomValues(new Uint8Array(16))), digest = await passwordHash(password, salt);
+    await d.batch([
+      d.prepare("UPDATE team_users SET salt=?,password_hash=?,status='active',updated_at=? WHERE email=?").bind(salt, digest, Date.now(), row.email),
+      d.prepare("DELETE FROM team_auth_tokens WHERE email=?").bind(row.email),
+      d.prepare("DELETE FROM team_sessions WHERE email=?").bind(row.email)
+    ]);
+    const token = randomToken();
+    await d.prepare("INSERT INTO team_sessions (token_hash,email,expires,created_at) VALUES (?,?,?,?)").bind(await hash(token), row.email, Date.now() + 12 * 3600e3, Date.now()).run();
+    const user = await d.prepare("SELECT role FROM team_users WHERE email=?").bind(row.email).first();
+    return json(request, { email: row.email, role: user.role, token });
+  }
+  if (b === "forgot" && post) {
+    if (await blocked()) return json(request, { error: "Too many requests. Try again in 15 minutes." }, 429);
+    await d.prepare("INSERT INTO login_fails (ip,ts) VALUES (?,?)").bind(ip,Date.now()).run();
+    const email = normEmail(body.email), user = await d.prepare("SELECT email,status FROM team_users WHERE email=? AND status='active'").bind(email).first();
+    if (user) { try { await issueMail(email, "reset", null); } catch (_) {} }
+    return json(request, { ok: true, message: "If that active account exists, a password reset link is on its way." });
   }
 
   const who = await whoIs(request, env);
   if (!who) return json(request, { error: "Please sign in" }, 401);
-  if (b === "me") return json(request, { name: who });
+  if (b === "me") return json(request, { email: who.email, role: who.role });
+  if (b === "logout" && post) { await d.prepare("DELETE FROM team_sessions WHERE token_hash=?").bind(await hash((request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, ""))).run(); return json(request, { ok: true }); }
+  if (b === "password" && post) {
+    const old = String(body.currentPassword || ""), user = await d.prepare("SELECT salt,password_hash FROM team_users WHERE email=?").bind(who.email).first();
+    if (!same(await passwordHash(old, user.salt), user.password_hash)) return json(request, { error: "Current password is incorrect." }, 401);
+    const next = String(body.password || ""); if (next.length < 12 || next.length > 200) return json(request, { error: "Use a password between 12 and 200 characters." }, 400);
+    const salt = b64u(crypto.getRandomValues(new Uint8Array(16))), digest = await passwordHash(next, salt);
+    await d.batch([d.prepare("UPDATE team_users SET salt=?,password_hash=?,updated_at=? WHERE email=?").bind(salt,digest,Date.now(),who.email), d.prepare("DELETE FROM team_sessions WHERE email=?").bind(who.email)]);
+    return json(request, { ok: true });
+  }
+  if (b === "users") {
+    if (who.role !== "admin") return json(request, { error: "Administrator access required." }, 403);
+    if (!post) { const { results } = await d.prepare("SELECT email,role,status,created_at FROM team_users ORDER BY email").all(); return json(request, { users: results }); }
+    const email = normEmail(body.email), role = body.role === "admin" ? "admin" : "editor";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json(request, { error: "Enter a valid email address." }, 400);
+    if (email === who.email && role !== "admin") return json(request, { error: "You cannot remove your own administrator access." }, 400);
+    const existing = await d.prepare("SELECT role,status FROM team_users WHERE email=?").bind(email).first();
+    if (existing?.status === "active") {
+      if (existing.role === role) return json(request, { error: "This user already has that access level." }, 409);
+      await d.prepare("UPDATE team_users SET role=?,updated_at=? WHERE email=?").bind(role,Date.now(),email).run();
+      return json(request, { ok: true, message: "Access updated." });
+    }
+    await d.prepare("INSERT INTO team_users (email,role,status,created_by,created_at,updated_at) VALUES (?,?,'invited',?,?,?) ON CONFLICT(email) DO UPDATE SET role=excluded.role,status=CASE WHEN team_users.status='active' THEN team_users.status ELSE 'invited' END,updated_at=excluded.updated_at")
+      .bind(email,role,who.email,Date.now(),Date.now()).run();
+    try { await issueMail(email,"invite",who); } catch (err) { return json(request, { error: err.message }, 503); }
+    return json(request, { ok: true });
+  }
+  if (b === "user" && post) {
+    if (who.role !== "admin") return json(request, { error: "Administrator access required." }, 403);
+    const email = normEmail(body.email);
+    if (email === who.email && body.action === "disable") return json(request, { error: "You cannot disable your own account." }, 400);
+    if (body.action === "disable") {
+      await d.batch([d.prepare("UPDATE team_users SET status='disabled',updated_at=? WHERE email=?").bind(Date.now(),email), d.prepare("DELETE FROM team_sessions WHERE email=?").bind(email), d.prepare("DELETE FROM team_auth_tokens WHERE email=?").bind(email)]);
+      return json(request, { ok: true });
+    }
+    const target = await d.prepare("SELECT email,status FROM team_users WHERE email=?").bind(email).first();
+    if (!target) return json(request, { error: "User not found." }, 404);
+    try { await issueMail(email,"invite",who); } catch (err) { return json(request, { error: err.message }, 503); }
+    return json(request, { ok: true });
+  }
 
   if (b === "crossing" && post) {                                   // record, correct or remove a control time
     if (c === "delete") {
@@ -366,7 +465,7 @@ async function handleTeam(request, env, b, c) {
     if (ts > Date.now() + 10 * 60e3 || ts < Date.now() - 72 * 3600e3) return json(request, { error: "That time is not valid (in the future or more than 3 days ago)." }, 400);
     await d.batch([
       d.prepare("UPDATE crossings SET deleted = 1 WHERE ride_id = ? AND control_no = ? AND air = ? AND deleted = 0").bind(rideId, no, air),
-      d.prepare("INSERT INTO crossings (ride_id, control_no, air, ts, entered_by, created) VALUES (?, ?, ?, ?, ?, ?)").bind(rideId, no, air, ts, who, Date.now()),
+      d.prepare("INSERT INTO crossings (ride_id, control_no, air, ts, entered_by, created) VALUES (?, ?, ?, ?, ?, ?)").bind(rideId, no, air, ts, who.email, Date.now()),
       d.prepare("UPDATE rider_marks SET deleted = 1 WHERE ride_id = ? AND air = ? AND mark = 'dns' AND deleted = 0").bind(rideId, air)
     ]);
     return json(request, { ok: true });
@@ -376,7 +475,7 @@ async function handleTeam(request, env, b, c) {
     const rideId = String(body.rideId || ""), air = String(body.air || "").trim(), mark = String(body.mark || "");
     if (!/^\d{3,6}$/.test(rideId) || !validAir(air) || !["dns", "dnf", "clear"].includes(mark)) return json(request, { error: "The ride, rider or status is not valid." }, 400);
     const ops = [d.prepare("UPDATE rider_marks SET deleted = 1 WHERE ride_id = ? AND air = ? AND deleted = 0").bind(rideId, air)];
-    if (mark !== "clear") ops.push(d.prepare("INSERT INTO rider_marks (ride_id, air, mark, ts, entered_by) VALUES (?, ?, ?, ?, ?)").bind(rideId, air, mark, Date.now(), who));
+    if (mark !== "clear") ops.push(d.prepare("INSERT INTO rider_marks (ride_id, air, mark, ts, entered_by) VALUES (?, ?, ?, ?, ?)").bind(rideId, air, mark, Date.now(), who.email));
     await d.batch(ops);
     return json(request, { ok: true });
   }

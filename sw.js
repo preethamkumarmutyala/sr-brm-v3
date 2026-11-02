@@ -1,7 +1,7 @@
 // Lets the site install as an app and open even with a weak connection.
 // Network first: you always get the newest version when online; the saved copy is only used offline.
 // Live rider data comes from the Worker (another address) and is never saved here.
-const CACHE = "sr-brm-v1";
+const CACHE = "sr-brm-v2";
 const SHELL = ["./", "index.html", "style.css", "app.js", "assets/logo.png", "manifest.webmanifest"];
 
 self.addEventListener("install", e => {

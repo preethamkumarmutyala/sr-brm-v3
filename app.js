@@ -644,18 +644,29 @@ const trackMsg = (code, name) => `Hello${name ? " " + name.split(" ")[0] : ""}! 
 4) Switch tracking ON before the start and OFF after you finish.
 Only the organising team can see your location, and only during your registered ride.`;
 
+function storeTeam(j) { localStorage.setItem(TEAM_KEY, JSON.stringify({ email: j.email, role: j.role, token: j.token, exp: Date.now() + 11.5 * 3600e3 })); }
 function renderLogin(msg = "") {
-  detailEl.innerHTML = `<h2>Team sign-in</h2><p class="note">For the organising team only.</p>
-    <form id="loginForm" class="ask"><input id="pin" type="password" autocomplete="current-password" placeholder="Your team PIN" aria-label="Team PIN" required>
-    <button class="btn" type="submit">Sign in</button></form>${msg ? `<p class="error">${esc(msg)}</p>` : ""}`;
-  document.getElementById("loginForm").addEventListener("submit", async e => {
-    e.preventDefault();
-    try {
-      const j = await api("/team/login", { pin: document.getElementById("pin").value });
-      localStorage.setItem(TEAM_KEY, JSON.stringify({ name: j.name, token: j.token, exp: Date.now() + 11.5 * 3600e3 }));
-      renderTeam();
-    } catch (err) { renderLogin(err.message); }
-  });
+  const params = new URLSearchParams(location.hash.split("?").slice(1).join("?")), invite = params.get("invite"), reset = params.get("reset"), setupToken = invite || reset;
+  if (setupToken) {
+    detailEl.innerHTML = `<h2>${invite ? "Set up your account" : "Choose a new password"}</h2><p class="note">Use at least 12 characters. This link can only be used once.</p>
+      <form id="setupForm" class="ask"><input id="newPassword" type="password" autocomplete="new-password" minlength="12" placeholder="New password" required><button class="btn" type="submit">Save password</button></form>${msg ? `<p class="error">${esc(msg)}</p>` : ""}`;
+    document.getElementById("setupForm").addEventListener("submit", async e => { e.preventDefault(); try {
+      const j = await api(`/team/${invite ? "activate" : "reset"}`, { token: setupToken, password: document.getElementById("newPassword").value });
+      history.replaceState(null, "", `${location.pathname}#team`); storeTeam(j); renderTeam();
+    } catch (err) { renderLogin(err.message); } }); return;
+  }
+  detailEl.innerHTML = `<h2>Team sign-in</h2><p class="note">Sign in with your invited email account.</p>
+    <form id="loginForm" class="ask"><input id="teamEmail" type="email" autocomplete="username" placeholder="Email address" aria-label="Email address" required>
+    <input id="teamPassword" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password" required><button class="btn" type="submit">Sign in</button></form>
+    <p><button type="button" class="linkbtn" id="forgotPassword">Forgot password?</button> · <button type="button" class="linkbtn" id="bootstrapAdmin">Set up first administrator</button></p>
+    <form id="forgotForm" class="ask" hidden><input id="forgotEmail" type="email" placeholder="Email address" required><button class="btn alt" type="submit">Send reset link</button></form>
+    ${msg ? `<p class="error">${esc(msg)}</p>` : ""}<p id="authMessage" class="note" aria-live="polite"></p>`;
+  document.getElementById("loginForm").addEventListener("submit", async e => { e.preventDefault(); try {
+    const j = await api("/team/login", { email: document.getElementById("teamEmail").value, password: document.getElementById("teamPassword").value }); storeTeam(j); renderTeam();
+  } catch (err) { renderLogin(err.message); } });
+  document.getElementById("forgotPassword").addEventListener("click", () => { document.getElementById("forgotForm").hidden = false; });
+  document.getElementById("forgotForm").addEventListener("submit", async e => { e.preventDefault(); try { const j = await api("/team/forgot", { email: document.getElementById("forgotEmail").value }); document.getElementById("authMessage").textContent = j.message; } catch (err) { renderLogin(err.message); } });
+  document.getElementById("bootstrapAdmin").addEventListener("click", async () => { const email = prompt("Enter the configured staging administrator email"); if (!email) return; try { const j = await api("/team/bootstrap", { email }); document.getElementById("authMessage").textContent = j.message; } catch (err) { renderLogin(err.message); } });
 }
 
 async function renderTeam() {
@@ -668,8 +679,9 @@ async function renderTeam() {
     desk.ride = pick ? pick.id : ""; desk.control = "";
   }
   const tab = (k, label) => `<button type="button" class="subbtn" data-team="tab" data-tab="${k}" aria-pressed="${desk.tab === k}">${label}</button>`;
-  let html = `<h2>Team desk</h2><p class="note">Signed in as <b>${esc(t.name)}</b>. <button type="button" class="linkbtn" data-team="signout">Sign out</button></p>
-    <div class="subnav">${tab("desk", "Control desk")}${tab("track", "Live tracking")}</div>`;
+  let html = `<h2>Team desk</h2><p class="note">Signed in as <b>${esc(t.email)}</b> (${esc(t.role)}). <button type="button" class="linkbtn" data-team="password">Change password</button> · <button type="button" class="linkbtn" data-team="signout">Sign out</button></p>
+    <div class="subnav">${tab("desk", "Control desk")}${tab("track", "Live tracking")}${t.role === "admin" ? tab("users", "Manage users") : ""}</div>`;
+  if (desk.tab === "users" && t.role === "admin") { detailEl.innerHTML = html + `<div id="deskBody">${loading("Loading users…")}</div>`; await renderUsers(); return; }
   if (!opts.length) { detailEl.innerHTML = html + `<p class="note">There is no ride in the next few days.</p>`; return; }
   html += `<div class="tools"><select id="deskRide" aria-label="Ride">${opts.map(r => `<option value="${r.id}" ${r.id === desk.ride ? "selected" : ""}>${esc(tripLabel(r))}</option>`).join("")}</select></div>
     <div id="deskBody">${loading("Loading…")}</div>`;
@@ -683,6 +695,30 @@ async function renderTeam() {
     const b = document.getElementById("deskBody");
     if (current === "team" && b) b.innerHTML = `<p class="error">${esc(err.message)}</p>`;
   }
+}
+
+async function renderUsers() {
+  const body = document.getElementById("deskBody"); if (!body) return;
+  try {
+    const j = await api("/team/users"); if (current !== "team" || desk.tab !== "users") return;
+    body.innerHTML = `<h3>Invite a teammate</h3><form id="inviteUser" class="ask"><input name="email" type="email" placeholder="Email address" required><select name="role"><option value="editor">Can edit ride data</option><option value="admin">Administrator</option></select><button class="btn" type="submit">Send invitation</button></form>
+      <div class="scroll"><table><thead><tr><th>Email</th><th>Access</th><th>Status</th><th>Action</th></tr></thead><tbody>${j.users.map(u => `<tr><td>${esc(u.email)}</td><td>${esc(u.role)}</td><td>${esc(u.status)}</td><td><button type="button" class="linkbtn" data-team="${u.status === "disabled" ? "enable" : u.status === "invited" ? "resend" : "disable"}" data-email="${esc(u.email)}">${u.status === "disabled" ? "Re-enable" : u.status === "invited" ? "Resend invite" : "Disable"}</button></td></tr>`).join("")}</tbody></table></div><p id="userMessage" class="note" aria-live="polite"></p>`;
+    document.getElementById("inviteUser").addEventListener("submit", async e => { e.preventDefault(); const f = new FormData(e.currentTarget); try { const result = await api("/team/users", { email: f.get("email"), role: f.get("role") }); await renderUsers(); const m = document.getElementById("userMessage"); if (m) m.textContent = result.message || "Invitation sent."; } catch (err) { alert(err.message); } });
+  } catch (err) { body.innerHTML = `<p class="error">${esc(err.message)}</p>`; }
+}
+
+function renderPasswordForm() {
+  detailEl.innerHTML = `<h2>Change password</h2><form id="passwordForm" class="ask">
+    <input name="currentPassword" type="password" autocomplete="current-password" placeholder="Current password" required>
+    <input name="password" type="password" autocomplete="new-password" minlength="12" placeholder="New password (12+ characters)" required>
+    <input name="confirmPassword" type="password" autocomplete="new-password" placeholder="Confirm new password" required>
+    <button class="btn" type="submit">Save password</button><button class="btn alt" type="button" data-team="cancelpassword">Cancel</button></form><p id="passwordMessage" class="error" aria-live="polite"></p>`;
+  document.getElementById("passwordForm").addEventListener("submit", async e => {
+    e.preventDefault(); const f = new FormData(e.currentTarget), password = f.get("password");
+    if (password !== f.get("confirmPassword")) { document.getElementById("passwordMessage").textContent = "The new passwords do not match."; return; }
+    try { await api("/team/password", { currentPassword: f.get("currentPassword"), password }); localStorage.removeItem(TEAM_KEY); renderLogin("Password changed. Please sign in again."); }
+    catch (err) { document.getElementById("passwordMessage").textContent = err.message; }
+  });
 }
 
 // A time as typed in a grid cell: "1432", "14:32", "932" or "D2 0310" (second day). Without a day it means the latest such time that is not in the future.
@@ -811,8 +847,13 @@ detailEl.addEventListener("click", async e => {
   if (!t) return;
   const act = t.dataset.team, air = t.dataset.air;
   try {
-    if (act === "signout") { localStorage.removeItem(TEAM_KEY); renderTeam(); }
+    if (act === "signout") { try { await api("/team/logout", {}); } catch (_) {} localStorage.removeItem(TEAM_KEY); renderTeam(); }
     else if (act === "tab") { desk.tab = t.dataset.tab; renderTeam(); }
+    else if (act === "password") renderPasswordForm();
+    else if (act === "cancelpassword") renderTeam();
+    else if (act === "disable") { if (confirm(`Disable ${t.dataset.email}?`)) { await api("/team/user", { email: t.dataset.email, action: "disable" }); await renderUsers(); } }
+    else if (act === "resend") { await api("/team/user", { email: t.dataset.email, action: "resend" }); await renderUsers(); }
+    else if (act === "enable") { await api("/team/user", { email: t.dataset.email, action: "enable" }); await renderUsers(); }
     else if (act === "mode") { desk.mode = t.dataset.mode; renderDesk(); }
     else if (act === "other") { const v = document.getElementById("deskOther").value.trim(); if (v) { desk.extra.push(v); renderDesk(); } }
     else if (act === "startall") {
@@ -847,7 +888,7 @@ detailEl.addEventListener("keydown", e => {                              // Ente
 
 // ---------- routing and refresh ----------
 function select() {
-  const h = location.hash.slice(1), wk = weekRides();
+  const [h] = location.hash.slice(1).split("?", 1), wk = weekRides();
   const byDistance = /^(200|300|400|600)$/.test(h) ? wk.find(r => r.distance === h) : null;   // old links like #600
   if (/^e\d+$/.test(h)) current = h.slice(1);
   else if (byDistance) current = byDistance.id;

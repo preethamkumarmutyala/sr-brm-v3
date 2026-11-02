@@ -1,30 +1,36 @@
 # Staging workflow
 
 The `staging` branch is the pre-release copy of the site. Cloudflare Pages can
-publish it at `staging.sr-brm-v3.pages.dev` when that branch is enabled for
-preview deployments. The canonical `sr-brm-v3.pages.dev` host continues to use
-the production API; branch previews and local development use the staging API.
+publish it at `staging.sr-brm-v3.pages.dev` when branch previews are enabled.
+The canonical `sr-brm-v3.pages.dev` host continues to use the production API;
+branch previews and local development use the staging API.
 
 ## Keep test data separate
 
 The frontend selects its API by hostname in `app.js`. The Worker source is in
-`worker/index.js`. Before using the staging site, create a **separate D1 database**
-for staging and deploy the Worker with the staging environment. Do not point the
-staging Worker at the production database.
+`worker/index.js`. Staging has its own D1 database and Worker. Never point it at
+the production database.
 
-1. Copy `worker/wrangler.toml.example` to `worker/wrangler.toml` and replace its
-   D1 ID placeholder with the staging database ID. This config can only target
-   the staging Worker and database. Keep the local config out of commits.
-2. From `worker/`, deploy staging with `npx wrangler deploy`.
-3. Set the staging-only `TEAM_PINS` secret with
-   `npx wrangler secret put TEAM_PINS --env staging`.
+1. Copy `worker/wrangler.toml.example` to `worker/wrangler.toml` and set its D1
+   ID, administrator email, verified Resend sender, and staging Pages origin.
+   Keep the local config out of commits.
+2. Set the `RESEND_API_KEY` secret on the staging Worker. Do not put it in Git
+   or send it in chat.
+3. From `worker/`, deploy staging with `npx wrangler deploy`.
 4. In Cloudflare Pages, keep `main` as the production branch and enable branch
    previews for `staging`. Push the `staging` branch to publish its preview.
-5. Use only test riders / consented devices on staging. Its tracking codes,
-   checkpoint entries, and location data are stored in the staging D1 database.
+5. Visit `#team` on staging and choose “Set up first administrator”. The email
+   must match `BOOTSTRAP_ADMIN_EMAIL`; the setup link is delivered by Resend.
+   Once the first account is active, administrators can invite and manage users
+   from the Team desk. Editors can record ride data; administrators can also
+   manage access. Users can change or reset their own passwords.
+6. Use only test riders / consented devices on staging. Tracking codes, control
+   entries, and location data are stored in the staging D1 database.
 
-The Worker creates its tables on first use. The app does not promote staging
-database contents to production.
+Invitations and password-reset links expire after one hour and work once.
+Passwords are stored as salted PBKDF2 hashes. Sessions are revocable and expire
+after 12 hours. The Worker creates the auth tables on first use. The app does
+not promote staging database contents to production.
 
 ## Promote a tested change
 
@@ -32,16 +38,14 @@ After review, merge the tested `staging` commit into `main`. Cloudflare Pages
 then publishes the same frontend code on the production host, where the host
 check in `app.js` selects the production API. If the Worker changed too, copy
 `worker/wrangler.production.toml.example` to
-`worker/wrangler.production.toml`, set the production D1 ID, and deploy with
-`npx wrangler deploy --config wrangler.production.toml` from `worker/`. Production
-requires its own `TEAM_PINS` secret. Keep staging and production PIN secrets
-separate.
+`worker/wrangler.production.toml`, set a production D1 ID, verified sender,
+owner email and site origin, then deploy with `npx wrangler deploy --config
+wrangler.production.toml` from `worker/`. Set a production-only `RESEND_API_KEY`
+secret. Keep production rollout separate from staging setup.
 
-## One-time Cloudflare setup still needed
+## One-time service setup
 
-This repository contains the Worker source now, but Cloudflare account settings
-are not stored in Git. The staging D1 database, its ID, the staging `TEAM_PINS`
-secret, and Pages preview-branch setting must be configured in the Cloudflare
-account before the preview can exercise team features. Staging is configured
-with its own Worker name and D1 binding, so its deploy command cannot target the
-production Worker or database.
+The staging D1 database and Pages preview setting already belong to Cloudflare.
+Email delivery requires a verified sending domain and a Resend API key. The
+Worker config stores non-secret values; the API key is a Worker secret. The
+staging Worker and D1 binding are isolated from production.
