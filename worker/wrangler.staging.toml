@@ -1,4 +1,5 @@
 # Staging Worker deployment configuration.
+# Cloudflare Workers Builds deploys this config from the staging branch.
 # The Gmail app password is stored separately as a Cloudflare secret.
 name = "sr-brm-api-staging"
 main = "index.js"
