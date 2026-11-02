@@ -7,7 +7,7 @@ workers_dev = true
 
 [vars]
 APP_ORIGIN = "https://staging.sr-brm-v3.pages.dev"
-MAIL_FROM = "SR BRM Team <team@YOUR_VERIFIED_SENDING_DOMAIN>"
+GMAIL_USER = "REPLACE_WITH_GMAIL_ADDRESS"
 BOOTSTRAP_ADMIN_EMAIL = "REPLACE_WITH_OWNER_EMAIL"
 
 [[d1_databases]]

@@ -6,7 +6,9 @@
 //   GET /crossings/:id   control times recorded by the team (public, read only)
 //   /team/...            account sign-in, user administration, control times and live positions
 //   /track               receives locations from the Traccar Client app (only kept for registered riders during their ride)
-// Team features need a D1 database, Resend API secret and configured first-admin email.
+// Team features need a D1 database, Gmail app-password secret and configured first-admin email.
+
+import { connect } from "cloudflare:sockets";
 
 const SOURCE = "https://www.audaxindia.in";
 const CLUB = "Secunderabad Randonneurs";
@@ -346,12 +348,54 @@ async function handleTeam(request, env, b, c) {
   const blocked = async () => { const r = await d.prepare("SELECT COUNT(*) AS n FROM login_fails WHERE ip=? AND ts>?").bind(ip, Date.now() - 15 * 60e3).first(); return r && r.n >= 8; };
 
   const sendMail = async (to, subject, token, kind) => {
-    if (!env.RESEND_API_KEY || !env.MAIL_FROM || !env.APP_ORIGIN) throw new Error("Email delivery is not configured yet.");
+    if (!env.GMAIL_USER || !env.GMAIL_APP_PASSWORD || !env.APP_ORIGIN) throw new Error("Gmail email delivery is not configured yet.");
     const link = `${String(env.APP_ORIGIN).replace(/\/$/, "")}/#team?${kind}=${encodeURIComponent(token)}`;
     const action = kind === "invite" ? "Set up your SR BRM team account" : "Reset your SR BRM password";
-    const result = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: env.MAIL_FROM, to: [to], subject, html: `<p>${action}</p><p><a href="${link}">${kind === "invite" ? "Set password" : "Reset password"}</a></p><p>This link expires in 60 minutes and can only be used once.</p>` }) });
-    if (!result.ok) throw new Error("The email service could not send the message.");
+    const html = `<p>${action}</p><p><a href="${link}">${kind === "invite" ? "Set password" : "Reset password"}</a></p><p>This link expires in 60 minutes and can only be used once.</p>`;
+    const socket = connect({ hostname: "smtp.gmail.com", port: 465 }, { secureTransport: "on" });
+    const reader = socket.readable.getReader(), writer = socket.writable.getWriter();
+    let pending = "";
+    const response = async expected => {
+      const lines = [];
+      for (;;) {
+        const end = pending.indexOf("\r\n");
+        if (end < 0) {
+          const chunk = await reader.read();
+          if (chunk.done) throw new Error("Gmail closed the email connection.");
+          pending += new TextDecoder().decode(chunk.value, { stream: true });
+          continue;
+        }
+        const line = pending.slice(0, end); pending = pending.slice(end + 2); lines.push(line);
+        if (/^\d{3} /.test(line)) {
+          const code = Number(line.slice(0, 3));
+          if (code !== expected) throw new Error("Gmail could not send the email (SMTP " + code + ").");
+          return lines.join("\n");
+        }
+      }
+    };
+    const command = async (value, expected) => { await writer.write(enc.encode(value + "\r\n")); return response(expected); };
+    try {
+      await response(220);
+      await command("EHLO sr-brm-v3.pages.dev", 250);
+      await command("AUTH LOGIN", 334);
+      await command(btoa(String(env.GMAIL_USER)), 334);
+      await command(btoa(String(env.GMAIL_APP_PASSWORD).replace(/\s/g, "")), 235);
+      await command(`MAIL FROM:<${env.GMAIL_USER}>`, 250);
+      await command(`RCPT TO:<${to}>`, 250);
+      await command("DATA", 354);
+      const message = [
+        `From: SR BRM Team <${env.GMAIL_USER}>`, `To: ${to}`, `Subject: ${subject}`,
+        "MIME-Version: 1.0", "Content-Type: text/html; charset=UTF-8", "Content-Transfer-Encoding: 8bit", "",
+        html.replace(/\r?\n/g, "\r\n").replace(/\r\n\./g, "\r\n..")
+      ].join("\r\n");
+      await writer.write(enc.encode(message + "\r\n.\r\n"));
+      await response(250);
+      await command("QUIT", 221);
+    } finally {
+      try { reader.releaseLock(); } catch (_) {}
+      try { writer.releaseLock(); } catch (_) {}
+      try { await socket.close(); } catch (_) {}
+    }
   };
   const issueMail = async (email, kind, who) => {
     const raw = randomToken(), expires = Date.now() + 3600e3;

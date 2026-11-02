@@ -12,15 +12,16 @@ The frontend selects its API by hostname in `app.js`. The Worker source is in
 the production database.
 
 1. Copy `worker/wrangler.toml.example` to `worker/wrangler.toml` and set its D1
-   ID, administrator email, verified Resend sender, and staging Pages origin.
-   Keep the local config out of commits.
-2. Set the `RESEND_API_KEY` secret on the staging Worker. Do not put it in Git
-   or send it in chat.
+   ID, Gmail address, administrator email, and staging Pages origin. Keep the
+   local config out of commits.
+2. Create a Gmail App Password for the sending account and set it as the
+   `GMAIL_APP_PASSWORD` secret on the staging Worker. Do not put it in Git or
+   send it in chat. Google requires 2-Step Verification for App Passwords.
 3. From `worker/`, deploy staging with `npx wrangler deploy`.
 4. In Cloudflare Pages, keep `main` as the production branch and enable branch
    previews for `staging`. Push the `staging` branch to publish its preview.
 5. Visit `#team` on staging and choose “Set up first administrator”. The email
-   must match `BOOTSTRAP_ADMIN_EMAIL`; the setup link is delivered by Resend.
+   must match `BOOTSTRAP_ADMIN_EMAIL`; the setup link is delivered by Gmail.
    Once the first account is active, administrators can invite and manage users
    from the Team desk. Editors can record ride data; administrators can also
    manage access. Users can change or reset their own passwords.
@@ -40,12 +41,12 @@ check in `app.js` selects the production API. If the Worker changed too, copy
 `worker/wrangler.production.toml.example` to
 `worker/wrangler.production.toml`, set a production D1 ID, verified sender,
 owner email and site origin, then deploy with `npx wrangler deploy --config
-wrangler.production.toml` from `worker/`. Set a production-only `RESEND_API_KEY`
-secret. Keep production rollout separate from staging setup.
+wrangler.production.toml` from `worker/`. Set a production-only
+`GMAIL_APP_PASSWORD` secret. Keep production rollout separate from staging setup.
 
 ## One-time service setup
 
 The staging D1 database and Pages preview setting already belong to Cloudflare.
-Email delivery requires a verified sending domain and a Resend API key. The
-Worker config stores non-secret values; the API key is a Worker secret. The
-staging Worker and D1 binding are isolated from production.
+Email delivery uses Gmail SMTP over a TLS connection. Google App Passwords
+require 2-Step Verification and are stored only as a Worker secret. The staging
+Worker and D1 binding are isolated from production.
