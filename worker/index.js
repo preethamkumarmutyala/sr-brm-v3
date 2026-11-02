@@ -1,4 +1,4 @@
-/  / SR BRM API - Cloudflare Worker
+// SR BRM API - Cloudflare Worker
 //   GET /calendar       your club's rides from the Audax calendars (2025, 2026, 2027), with the event id when the ride has a page
 //   GET /ev/:id         one event page: details, ride name, riders, route-map link, route-card ids
 //   GET /rt/:id         official route card (View route): controls + cue sheet
@@ -279,7 +279,7 @@ const getCalendar = ctx => cached("calendar-v1", d => (d.errors.length ? 120 : C
 const LIMIT_H = { "100": 7.5, "150": 10.5, "200": 13.5, "300": 20, "400": 27, "600": 40, "1000": 75, "1200": 90, Fleche: 24 };   // time limit in hours
 const enc = new TextEncoder();
 const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-const unb64u = s => { s = String(s); return Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((4 - s.length % 4) % 4)), c => c.charCodeAt(0)); };
+const unb64u = s => { s = String(s).replace(/-/g, "+").replace(/_/g, "/"); if (s.length % 4 === 1) throw new Error("Invalid base64url data."); return Uint8Array.from(atob(s.padEnd(Math.ceil(s.length / 4) * 4, "=")), c => c.charCodeAt(0)); };
 const same = (a, b) => { a = String(a); b = String(b); let x = a.length ^ b.length; for (let i = 0; i < Math.max(a.length, b.length); i++) x |= (a.charCodeAt(i % (a.length || 1)) || 0) ^ (b.charCodeAt(i % (b.length || 1)) || 0); return x === 0; };
 const sameAir = (a, b) => String(a).trim().replace(/^0+/, "") === String(b).trim().replace(/^0+/, "");
 const validAir = a => /^[0-9A-Za-z-]{1,12}$/.test(a);
