@@ -658,7 +658,7 @@ function renderLogin(msg = "") {
   detailEl.innerHTML = `<h2>Team sign-in</h2><p class="note">Sign in with your invited email account.</p>
     <form id="loginForm" class="ask"><input id="teamEmail" type="email" autocomplete="username" placeholder="Email address" aria-label="Email address" required>
     <input id="teamPassword" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password" required><button class="btn" type="submit">Sign in</button></form>
-    <p><button type="button" class="linkbtn" id="forgotPassword">Forgot password?</button> · <button type="button" class="linkbtn" id="bootstrapAdmin">Set up first administrator</button></p>
+    <p><button type="button" class="linkbtn" id="forgotPassword">Forgot password?</button> · <button type="button" class="linkbtn" id="bootstrapAdmin" hidden>Set up first administrator</button></p>
     <form id="forgotForm" class="ask" hidden><input id="forgotEmail" type="email" placeholder="Email address" required><button class="btn alt" type="submit">Send reset link</button></form>
     ${msg ? `<p class="error">${esc(msg)}</p>` : ""}<p id="authMessage" class="note" aria-live="polite"></p>`;
   document.getElementById("loginForm").addEventListener("submit", async e => { e.preventDefault(); try {
