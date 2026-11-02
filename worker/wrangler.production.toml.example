@@ -1,0 +1,11 @@
+# Production-only deployment config. Use only after a reviewed staging release.
+# Copy to worker/wrangler.production.toml and replace with the production D1 ID.
+name = "sr-brm-api"
+main = "index.js"
+compatibility_date = "2026-11-02"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sr-brm-production"
+database_id = "REPLACE_WITH_PRODUCTION_D1_DATABASE_ID"

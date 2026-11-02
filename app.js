@@ -1,5 +1,9 @@
 // SR BRM dashboard: Now, current / next / past seasons, ride pages, One Week SR, BRM Assistant
-const API_BASE = "https://sr-brm-api.secunderabadrandonneurs.workers.dev";
+// Only the canonical Pages hostname talks to production. Branch previews and local
+// development use the isolated staging Worker so test writes cannot reach live data.
+const API_BASE = location.hostname.toLowerCase() === "sr-brm-v3.pages.dev"
+  ? "https://sr-brm-api.secunderabadrandonneurs.workers.dev"
+  : "https://sr-brm-api-staging.secunderabadrandonneurs.workers.dev";
 const AUDAX = "https://www.audaxindia.in";
 const LEGACY = { "10047": "600", "10048": "200", "10049": "300", "10050": "400" };   // old backup cue-sheet files: data/<distance>.json
 const SR_DISTANCES = ["200", "300", "400", "600"];

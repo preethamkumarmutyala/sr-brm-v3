@@ -1,0 +1,11 @@
+# Staging-only deployment config. This intentionally cannot bind production D1.
+# Copy to worker/wrangler.toml and replace the ID with the staging D1 database ID.
+name = "sr-brm-api-staging"
+main = "index.js"
+compatibility_date = "2026-11-02"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sr-brm-staging"
+database_id = "REPLACE_WITH_STAGING_D1_DATABASE_ID"

@@ -1,0 +1,4 @@
+# Account-specific Worker config contains Cloudflare resource IDs.
+worker/wrangler.toml
+worker/wrangler.production.toml
+worker/.wrangler/
