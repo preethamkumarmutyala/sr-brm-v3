@@ -1,0 +1,16 @@
+# Staging Worker deployment configuration.
+# The Gmail app password is stored separately as a Cloudflare secret.
+name = "sr-brm-api-staging"
+main = "index.js"
+compatibility_date = "2026-11-02"
+workers_dev = true
+
+[vars]
+APP_ORIGIN = "https://staging.sr-brm-v3.pages.dev"
+GMAIL_USER = "preethamkumar@gmail.com"
+BOOTSTRAP_ADMIN_EMAIL = "preethamkumar@gmail.com"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sr-brm-staging"
+database_id = "54aaf040-05b3-4841-8dda-3001c1d0d891"
