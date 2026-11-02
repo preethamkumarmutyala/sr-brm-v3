@@ -673,7 +673,7 @@ async function renderTeam() {
   clearInterval(teamTimer);
   const t = getTeam();
   if (!t) return renderLogin();
-  const opts = rides.filter(r => r.id && Math.abs(dayDiff(r.date)) <= 4);
+    const opts = rides.filter(r => r.id).slice().sort(byDate); // all calendar events are available for review and corrections
   if (!opts.some(r => r.id === desk.ride)) {
     const pick = opts.find(r => rideStatus(r).k === "ongoing") || opts.find(r => r.date >= todayIST()) || opts[opts.length - 1];
     desk.ride = pick ? pick.id : ""; desk.control = "";
@@ -732,8 +732,8 @@ function parseCell(text, rideDate, startMs) {
   if (dm) { dayN = Number(dm[1]); t = t.slice(dm[0].length); }
   const m = t.match(/^(\d{1,2})[:.]?(\d{2})$/);
   if (!m || +m[1] > 23 || +m[2] > 59) throw new Error('Type the time like 1432 or 14:32. For the second day add D2, like D2 0310.');
-  let ts = dayN ? Date.parse(`${rideDate}T${pad2(m[1])}:${m[2]}:00+05:30`) + (dayN - 1) * 864e5 : Date.parse(`${todayIST()}T${pad2(m[1])}:${m[2]}:00+05:30`);
-  if (!dayN && ts > Date.now() + 10 * 60e3) ts -= 864e5;
+  let ts = Date.parse(`${rideDate}T${pad2(m[1])}:${m[2]}:00+05:30`) + (dayN ? (dayN - 1) * 864e5 : 0); if (!dayN && ts < startMs - 3 * 3600e3) ts += 864e5;
+  // Interpret early-morning entries as the next day when appropriate.
   if (ts < startMs - 3 * 3600e3) throw new Error("That time is before the ride started. For the second day type D2 first, like D2 0310.");
   return ts;
 }
