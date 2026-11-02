@@ -197,13 +197,8 @@ async function api(path, body) {          // talks to the Worker; sends the team
 const crossCache = {}, markCache = {}, progressCache = {};
 async function fetchCrossings(id, force) {
   if (!force && crossCache[id]) return crossCache[id];
-  try { const j = await api(`/crossings/${id}`); crossCache[id] = j.crossings || []; markCache[id] = j.marks || []; } catch (_) { crossCache[id] = crossCache[id] || []; }
+  try { const j = await api(`/crossings/${id}`); crossCache[id] = j.crossings || []; markCache[id] = j.marks || []; progressCache[id] = j.progress || []; } catch (_) { crossCache[id] = crossCache[id] || []; }
   return crossCache[id];
-}
-async function fetchProgress(id) {
-  try { const r = await fetch(`${API_BASE}/progress/${id}`), j = await r.json(); progressCache[id] = r.ok ? (j.progress || []) : []; }
-  catch (_) { progressCache[id] = progressCache[id] || []; }
-  return progressCache[id];
 }
 const sameAir = (a, b) => String(a).trim().replace(/^0+/, "") === String(b).trim().replace(/^0+/, "");
 const cno = (c, i) => Number(c.no ?? i + 1);                       // a control's number (its position in the list if Audax gives none)
@@ -424,7 +419,6 @@ async function showEvent(id, force) {
   }
   await fetchRoute(id, force);
   await fetchCrossings(id, true);               // control times and rider marks change during a ride, so always ask again
-  await fetchProgress(id);
   if (current !== id) return;
   renderTiles(); renderDetail();
 }
@@ -938,7 +932,6 @@ setInterval(async () => {                 // while a ride is on, check for new c
   const r = rides.find(x => x.id === current);
   if (!r || rideStatus(r).k !== "ongoing") return;
   await fetchCrossings(current, true);
-  await fetchProgress(current);
   renderDetail();
 }, 60 * 1000);
 

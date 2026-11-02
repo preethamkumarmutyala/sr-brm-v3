@@ -361,9 +361,11 @@ async function handleCrossings(request, env, rideId) {
   const team = await whoIs(request, env);
   const { results } = await d.prepare("SELECT id, control_no, air, ts, entered_by FROM crossings WHERE ride_id = ? AND deleted = 0 ORDER BY ts").bind(rideId).all();
   const marks = (await d.prepare("SELECT air, mark FROM rider_marks WHERE ride_id = ? AND deleted = 0").bind(rideId).all()).results;   // team-set "dns" / "dnf"
+  const progress = (await d.prepare("SELECT air, ROUND(km, 2) AS km, updated AS ts FROM rider_progress WHERE ride_id = ? ORDER BY km DESC").bind(rideId).all()).results;
   return json(request, {
     ready: true,
     marks,
+    progress,
     crossings: results.map(r => team ? { id: r.id, no: r.control_no, air: r.air, ts: r.ts, by: r.entered_by } : { no: r.control_no, air: r.air, ts: r.ts })
   }, 200, { "Cache-Control": "no-store" });
 }
@@ -698,13 +700,6 @@ export default {
         const { data, cache } = await getCalendar(ctx);
         if (env.STAGING_MODE === "true") data.rides = [...data.rides.filter(r => r.id !== TEST_RIDE_ID), virtualTestEvent()];
         return json(request, data, 200, { "Cache-Control": "public, max-age=300", "X-Cache": cache });
-      }
-
-      if (a === "progress" && /^\d{3,6}$/.test(b || "")) {
-        const d = await db(env);
-        if (!d) return json(request, { ready: false, progress: [] }, 200, { "Cache-Control": "no-store" });
-        const { results } = await d.prepare("SELECT air, ROUND(km, 2) AS km, updated AS ts FROM rider_progress WHERE ride_id=? ORDER BY km DESC").bind(b).all();
-        return json(request, { progress: results }, 200, { "Cache-Control": "no-store" });
       }
 
       if (env.STAGING_MODE === "true" && a === "ev" && b === TEST_RIDE_ID) return json(request, virtualTestEvent(), 200, { "Cache-Control": "no-store" });
