@@ -17,7 +17,7 @@ const YEARS_BACK = 1;                          // past seasons to include before
 const YEARS_AHEAD = 1;                         // upcoming rides: this many years after the current one
 const LEGACY = { "600": "10047", "200": "10048", "300": "10049", "400": "10050" };
 const TEST_RIDE_ID = "999999";
-const TEST_AIR = "TEST001";
+const TEST_AIR = "0949";
 
 function virtualTestEvent() {
   const now = new Date(Date.now() - 10 * 60e3 + 5.5 * 3600e3);
@@ -26,22 +26,23 @@ function virtualTestEvent() {
   const monthName = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(month) - 1];
   return {
     id: TEST_RIDE_ID, year: Number(year), month: Number(month), day: Number(day), date,
-    distance: "10", title: `Virtual staging ride on ${Number(day)}-${monthName}-${year}`,
-    rideName: "Staging GPS and checkpoint test", registrationClose: "", startTime,
-    startLocation: "Virtual test ride", routeMap: "", calendarId: TEST_RIDE_ID, routeId: "",
-    riderCount: 1, riders: [{ seq: "1", name: "Staging Test Rider", air: TEST_AIR, fee: "", medal: "", result: "", club: "Staging" }],
+    distance: "24.64", title: `Staging home–college–home GPS test on ${Number(day)}-${monthName}-${year}`,
+    rideName: "Preetham's staging home–college–home test", registrationClose: "", startTime,
+    startLocation: "Private staging test start", routeMap: "", calendarId: TEST_RIDE_ID, routeId: "",
+    riderCount: 1, riders: [{ seq: "1", name: "Preetham Kumar", air: TEST_AIR, fee: "", medal: "", result: "", club: "Staging" }],
     fetchedAt: new Date().toISOString()
   };
 }
 
 function virtualTestRoute() {
   const controls = [
-    { no: 1, km: "0.00", location: "Virtual start", type: "START POINT", open: "", close: "" },
-    { no: 2, km: "5.00", location: "Test control 1", type: "CONTROL", open: "", close: "" },
-    { no: 3, km: "10.00", location: "Virtual finish", type: "END POINT", open: "", close: "" }
+    { no: 1, km: "0.00", location: "Private staging test start", type: "START POINT", open: "", close: "" },
+    { no: 2, km: "12.12", location: "College of Fine Arts, JNAFA University (turnaround)", type: "CONTROL", open: "", close: "" },
+    { no: 3, km: "24.64", location: "Private staging test finish", type: "END POINT", open: "", close: "" }
   ];
-  return { id: TEST_RIDE_ID, info: { routeName: "Staging virtual 10 km", distance: "10.00" }, controls,
-    cue: controls.map((c, i) => ({ no: i + 1, control: true, location: c.location, type: c.type, partial: i ? "5.00" : "0.00", km: c.km, open: "", close: "" })),
+  return { id: TEST_RIDE_ID, info: { routeName: "Staging home–college–home", distance: "24.64" }, controls,
+    cue: controls.map((c, i) => ({ no: i + 1, control: true, location: c.location, type: c.type,
+      partial: i === 0 ? "0.00" : i === 1 ? "12.12" : "12.52", km: c.km, open: "", close: "" })),
     fetchedAt: new Date().toISOString() };
 }
 
