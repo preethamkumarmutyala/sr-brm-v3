@@ -340,6 +340,7 @@ async function db(env) {                  // the tables are created automaticall
       q("CREATE TABLE IF NOT EXISTS positions (id INTEGER PRIMARY KEY AUTOINCREMENT, ride_id TEXT NOT NULL, air TEXT NOT NULL, ts INTEGER NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL, speed REAL, batt REAL)"),
       q("CREATE INDEX IF NOT EXISTS idx_positions_ride ON positions (ride_id, air, ts)"),
       q("CREATE TABLE IF NOT EXISTS rider_progress (ride_id TEXT NOT NULL, air TEXT NOT NULL, km REAL NOT NULL DEFAULT 0, last_lat REAL NOT NULL, last_lon REAL NOT NULL, last_ts INTEGER NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY (ride_id, air))"),
+      q("CREATE TABLE IF NOT EXISTS ride_routes (ride_id TEXT PRIMARY KEY, points_json TEXT NOT NULL, point_count INTEGER NOT NULL, updated_by TEXT NOT NULL, updated INTEGER NOT NULL)"),
       q("CREATE TABLE IF NOT EXISTS login_fails (ip TEXT NOT NULL, ts INTEGER NOT NULL)"),
       q("CREATE TABLE IF NOT EXISTS team_users (email TEXT PRIMARY KEY, role TEXT NOT NULL, status TEXT NOT NULL, salt TEXT, password_hash TEXT, created_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)"),
       q("CREATE TABLE IF NOT EXISTS team_auth_tokens (token_hash TEXT PRIMARY KEY, email TEXT NOT NULL, kind TEXT NOT NULL, expires INTEGER NOT NULL, created_by TEXT, created_at INTEGER NOT NULL)"),
@@ -584,6 +585,19 @@ async function handleTeam(request, env, b, c) {
       "SELECT p.air, p.ts, p.lat, p.lon, p.speed, p.batt, COALESCE(g.km, 0) AS km FROM positions p JOIN (SELECT air, MAX(ts) AS m FROM positions WHERE ride_id = ? GROUP BY air) x ON p.air = x.air AND p.ts = x.m LEFT JOIN rider_progress g ON g.ride_id=p.ride_id AND g.air=p.air WHERE p.ride_id = ?"
     ).bind(c, c).all();
     return json(request, { positions: results }, 200, { "Cache-Control": "no-store" });
+  }
+  if (b === "route" && /^\d{3,6}$/.test(c || "")) {                  // private route geometry for the team map
+    if (!post) {
+      const row = await d.prepare("SELECT points_json, point_count, updated, updated_by FROM ride_routes WHERE ride_id=?").bind(c).first();
+      return json(request, { route: row ? { points: JSON.parse(row.points_json), pointCount: row.point_count, updated: row.updated, updatedBy: row.updated_by } : null }, 200, { "Cache-Control": "no-store" });
+    }
+    if (who.role !== "admin") return json(request, { error: "Only an administrator can change the route file." }, 403);
+    const points = Array.isArray(body.points) ? body.points : [];
+    if (points.length < 2 || points.length > 3000 || points.some(p => !Array.isArray(p) || p.length !== 2 || !Number.isFinite(p[0]) || !Number.isFinite(p[1]) || Math.abs(p[0]) > 90 || Math.abs(p[1]) > 180))
+      return json(request, { error: "The GPX route must contain 2 to 3,000 valid track points." }, 400);
+    await d.prepare("INSERT INTO ride_routes (ride_id,points_json,point_count,updated_by,updated) VALUES (?,?,?,?,?) ON CONFLICT(ride_id) DO UPDATE SET points_json=excluded.points_json,point_count=excluded.point_count,updated_by=excluded.updated_by,updated=excluded.updated")
+      .bind(c, JSON.stringify(points), points.length, who.email, Date.now()).run();
+    return json(request, { ok: true, pointCount: points.length });
   }
   return json(request, { error: "Not found" }, 404);
 }

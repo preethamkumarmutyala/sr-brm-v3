@@ -629,6 +629,7 @@ async function ask() {
 // ---------- team area (hidden address: #team) ----------
 let desk = { tab: "desk", ride: "", control: "", q: "", sel: "", mode: "type", extra: [] };
 let teamTimer = null;
+let teamMapInstance = null;
 const tripLabel = r => { const f = dateParts(r.date); return `${f.wd} ${f.d} ${MON[f.m - 1]}, ${kmLabel(r.distance)}`; };
 const clockNow = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(11, 16);
 const parseClock = v => {
@@ -677,6 +678,7 @@ function renderLogin(msg = "") {
 
 async function renderTeam() {
   clearInterval(teamTimer);
+  teamMapInstance?.remove(); teamMapInstance = null;
   const t = getTeam();
   if (!t) return renderLogin();
     const opts = rides.filter(r => r.id).slice().sort(byDate); // all calendar events are available for review and corrections
@@ -820,14 +822,82 @@ async function setMark(sel) {
   renderDesk();
 }
 
+function simplifyTrack(points, maxPoints = 2500) {
+  if (points.length <= maxPoints) return points;
+  const meanLat = points.reduce((sum, p) => sum + p[0], 0) / points.length, cos = Math.cos(meanLat * Math.PI / 180);
+  const xy = points.map(p => [p[1] * cos, p[0]]);
+  const distanceToSegmentSq = (p, a, b) => {
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    if (!dx && !dy) return (p[0] - a[0]) ** 2 + (p[1] - a[1]) ** 2;
+    const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy)));
+    return (p[0] - (a[0] + t * dx)) ** 2 + (p[1] - (a[1] + t * dy)) ** 2;
+  };
+  const simplify = tolerance => {
+    const keep = new Uint8Array(points.length), stack = [[0, points.length - 1]];
+    keep[0] = keep[points.length - 1] = 1;
+    while (stack.length) {
+      const [first, last] = stack.pop(); let max = tolerance * tolerance, at = -1;
+      for (let i = first + 1; i < last; i++) { const d = distanceToSegmentSq(xy[i], xy[first], xy[last]); if (d > max) { max = d; at = i; } }
+      if (at > 0) { keep[at] = 1; stack.push([first, at], [at, last]); }
+    }
+    return points.filter((_, i) => keep[i]);
+  };
+  for (const tolerance of [.00003, .00006, .00012, .00024, .00048, .00096, .00192, .00384, .00768]) {
+    const out = simplify(tolerance); if (out.length <= maxPoints) return out;
+  }
+  const stride = (points.length - 1) / (maxPoints - 1);
+  return Array.from({ length: maxPoints }, (_, i) => points[Math.round(i * stride)]);
+}
+
+function distanceToRouteKm(point, route) {
+  if (!route || route.length < 2) return null;
+  const lat = point[0], lon = point[1], cos = Math.cos(lat * Math.PI / 180), scaleX = 111.32 * cos, scaleY = 110.57;
+  const xy = p => [(p[1] - lon) * scaleX, (p[0] - lat) * scaleY];
+  let best = Infinity;
+  for (let i = 1; i < route.length; i++) {
+    const a = xy(route[i - 1]), b = xy(route[i]), dx = b[0] - a[0], dy = b[1] - a[1];
+    const t = Math.max(0, Math.min(1, -(a[0] * dx + a[1] * dy) / (dx * dx + dy * dy || 1)));
+    best = Math.min(best, Math.hypot(a[0] + t * dx, a[1] + t * dy));
+  }
+  return best;
+}
+
+function drawTeamMap(positions, riders, route, selectedAir) {
+  const host = document.getElementById("teamMap");
+  if (!host || !window.L) return;
+  const map = L.map(host, { scrollWheelZoom: true });
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>' }).addTo(map);
+  const bounds = [];
+  if (route?.points?.length > 1) {
+    L.polyline(route.points, { color: "#d84315", weight: 5, opacity: .82 }).addTo(map).bindTooltip("Official GPX route");
+    bounds.push(...route.points);
+  }
+  const byAir = new Map(riders.map(r => [String(r.air).replace(/^0+/, ""), r]));
+  for (const p of positions) {
+    const rider = byAir.get(String(p.air).replace(/^0+/, "")), name = rider?.name || `AIR ${p.air}`, deviation = distanceToRouteKm([p.lat, p.lon], route?.points), off = deviation != null && deviation > 1;
+    const dot = L.divIcon({ className: "", html: `<span class="rider-dot ${off ? "offroute" : "onroute"}"></span>`, iconSize: [18, 18], iconAnchor: [9, 9] });
+    const marker = L.marker([p.lat, p.lon], { icon: dot }).addTo(map);
+    marker.bindTooltip(`${esc(name)} · AIR ${esc(p.air)}`, { direction: "top", offset: [0, -8], opacity: .98 });
+    const details = `<b>${esc(name)}</b><br>AIR ${esc(p.air)}<br>GPS distance: ~${esc(km2(p.km || 0))} km${deviation != null ? `<br>${off ? "Possibly off route" : "Near route"}: ${esc(km2(deviation))} km from line` : ""}<br>Last update: ${esc(new Date(p.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}`;
+    marker.bindPopup(details);
+    if (selectedAir && sameAir(p.air, selectedAir)) marker.openPopup();
+    bounds.push([p.lat, p.lon]);
+  }
+  if (bounds.length > 1) map.fitBounds(bounds, { padding: [28, 28], maxZoom: 13 });
+  else if (bounds.length === 1) map.setView(bounds[0], 13);
+  else map.setView([17.385, 78.4867], 10);
+  return map;
+}
+
 async function renderTrackAdmin() {
-  const [codes, tr] = await Promise.all([api("/team/codes"), api(`/team/tracking/${desk.ride}`)]);
+  const [codes, tr, routeData] = await Promise.all([api("/team/codes"), api(`/team/tracking/${desk.ride}`), api(`/team/route/${desk.ride}`)]);
   const body = document.getElementById("deskBody");
   if (!body || current !== "team") return;
   const ev = cache[desk.ride], ride = rides.find(r => r.id === desk.ride), live = ride && rideStatus(ride).k === "ongoing";
   const codeOf = air => codes.codes.find(c => sameAir(c.air, air)), posOf = air => tr.positions.find(p => sameAir(p.air, air));
+  const route = routeData.route, riders = ev?.riders || [], positioned = tr.positions.filter(p => riders.some(r => sameAir(r.air, p.air)) || desk.ride === "999999");
   const ago = ts => { const m = Math.max(0, Math.round((Date.now() - ts) / 60000)); return m < 60 ? `${m} min ago` : `${Math.floor(m / 60)}h ${m % 60}m ago`; };
-  const rows = (ev?.riders || []).slice().sort((a, b) => a.name.localeCompare(b.name)).map(r => {
+  const rows = riders.slice().sort((a, b) => a.name.localeCompare(b.name)).map(r => {
     const c = codeOf(r.air), p = posOf(r.air), quiet = c && live && (!p || Date.now() - p.ts > 30 * 60e3);
     return `<div class="trow"><div class="tname"><b>${esc(r.name)}</b><small>AIR ${esc(r.air)}</small></div><div class="tact">
       ${c ? `<code class="code">${esc(c.token)}</code><button type="button" class="linkbtn" data-team="copy" data-code="${esc(c.token)}" data-name="${esc(r.name)}">Copy message</button>`
@@ -835,11 +905,33 @@ async function renderTrackAdmin() {
       ${p ? `<button type="button" class="linkbtn" data-team="pick" data-air="${esc(r.air)}">~${esc(km2(p.km))} km · ${esc(ago(p.ts))}${p.batt != null ? `, battery ${Math.round(p.batt)}%` : ""}</button>` : (c ? '<span class="chip load">No signal yet</span>' : "")}
       ${quiet ? '<span class="chip closed">Silent over 30 min</span>' : ""}</div></div>`;
   }).join("");
-  const sel = desk.sel && posOf(desk.sel);
-  body.innerHTML = `<p class="note">GPS starts after the team records CP1 and stops after the final control, DNS, or DNF. Exact locations are visible to the team; the public board shows only approximate GPS km.</p>
-    ${sel ? `<div class="tmap"><iframe class="map" title="Rider location" src="https://www.google.com/maps?q=${sel.lat},${sel.lon}&z=15&output=embed"></iframe>
-      <p class="note">About ${esc(km2(sel.km))} km by GPS · last seen ${esc(ago(sel.ts))}${sel.speed != null ? `, ${Math.round(sel.speed)} km/h` : ""}. <a href="https://www.google.com/maps?q=${sel.lat},${sel.lon}" target="_blank" rel="noopener">Open in Google Maps</a></p></div>` : ""}
+  const routeMsg = route ? `GPX route loaded (${route.pointCount.toLocaleString()} points).` : "No GPX route uploaded for this ride yet.";
+  body.innerHTML = `<p class="note">GPS starts after the team records CP1 and stops after the final control, DNS, or DNF. This live map is team-only; the public ride page shows only approximate GPS km.</p>
+    <div class="team-map-tools">${getTeam()?.role === "admin" ? '<label class="btn alt" for="gpxRouteFile">Upload GPX Track</label><input id="gpxRouteFile" type="file" accept=".gpx,application/gpx+xml" hidden>' : ""}<span id="gpxStatus" class="gpx-status">${esc(routeMsg)}</span><span class="chip">${positioned.length} rider${positioned.length === 1 ? "" : "s"} on map</span></div>
+    <p class="team-map-note">Hover a marker for rider name and AIR number; tap or click for distance and update time. Red markers are more than 1 km from the uploaded route and should be checked with the rider.</p>
+    <div id="teamMap" role="img" aria-label="Live map showing rider positions and the uploaded GPX route"></div>
     <div class="trows">${rows || '<p class="note">No registered riders yet.</p>'}</div>`;
+  teamMapInstance = drawTeamMap(positioned, riders, route, desk.sel);
+  const upload = document.getElementById("gpxRouteFile");
+  upload?.addEventListener("change", async e => {
+    const file = e.target.files?.[0]; if (!file) return;
+    const status = document.getElementById("gpxStatus");
+    try {
+      if (file.size > 15 * 1024 * 1024) throw new Error("Choose a GPX file smaller than 15 MB.");
+      const xml = new DOMParser().parseFromString(await file.text(), "application/xml");
+      if (xml.querySelector("parsererror")) throw new Error("That file is not valid GPX/XML.");
+      const trackPoints = [...xml.getElementsByTagName("trkpt")].map(p => [p.getAttribute("lat"), p.getAttribute("lon")])
+        .filter(p => p[0] !== null && p[1] !== null && p[0] !== "" && p[1] !== "")
+        .map(p => [Number(p[0]), Number(p[1])]).filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]) && Math.abs(p[0]) <= 90 && Math.abs(p[1]) <= 180);
+      if (trackPoints.length < 2) throw new Error("This GPX has no route track points. Export GPX Track (the route line), not GPX Route (which may contain only cue points).");
+      const points = simplifyTrack(trackPoints);
+      status.textContent = `Saving ${file.name}…`;
+      const result = await api(`/team/route/${desk.ride}`, { points });
+      status.textContent = `${file.name} saved (${result.pointCount.toLocaleString()} route points).`;
+      desk.sel = ""; await renderTeam();
+    } catch (err) { status.textContent = err.message; }
+    finally { e.target.value = ""; }
+  });
   teamTimer = setInterval(() => { if (current === "team" && desk.tab === "track" && document.activeElement?.tagName !== "INPUT") renderTeam(); }, 60000);
 }
 

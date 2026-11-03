@@ -276,6 +276,17 @@ details.inner > summary { cursor: pointer; font-weight: 500; margin-bottom: .4re
 .tact .btn { padding: .4rem 1rem; }
 .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; background: var(--surface2); border: 1px solid var(--line); border-radius: 8px; padding: .1rem .55rem; letter-spacing: .08em; }
 .tmap { margin-bottom: 1rem; }
+#teamMap { height: min(68vh, 680px); min-height: 360px; border: 1px solid var(--line); border-radius: 14px; z-index: 0; background: var(--surface); }
+.team-map-tools { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; margin: .75rem 0; }
+.team-map-tools .btn { cursor: pointer; }
+.team-map-note { color: var(--muted); font-size: .92rem; margin: .4rem 0 .75rem; }
+.gpx-status { color: var(--muted); }
+.rider-map-label { font-weight: 700; color: #10202b; background: #fff; border: 2px solid #d84315; border-radius: 999px; padding: .18rem .5rem; box-shadow: 0 1px 5px #0005; white-space: nowrap; }
+.rider-map-label.offroute { border-color: #c62828; color: #8e1616; }
+.rider-dot { display: block; width: 12px; height: 12px; border: 3px solid white; border-radius: 50%; box-shadow: 0 1px 6px #0008; }
+.rider-dot.onroute { background: #147d54; }
+.rider-dot.offroute { background: #c62828; }
+.leaflet-container { font: inherit; }
 
 .tag.riding { background: var(--live-bg); color: var(--live); }
 .tag.waiting { background: var(--warn-bg); color: var(--warn); }
