@@ -1,7 +1,7 @@
 {
-  "name": "SR BRM Dashboard",
-  "short_name": "SR BRM",
-  "description": "Secunderabad Randonneurs: this week's rides, riders and results in one place",
+  "name": "SR BRM Staging",
+  "short_name": "SR Staging",
+  "description": "Staging test site for Secunderabad Randonneurs",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
