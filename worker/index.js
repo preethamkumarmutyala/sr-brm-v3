@@ -373,7 +373,7 @@ async function handleCrossings(request, env, rideId) {
   }, 200, { "Cache-Control": "no-store" });
 }
 
-async function handleTeam(request, env, b, c) {
+async function handleTeam(request, env, b, c, ctx) {
   const d = await db(env);
   if (!d) return json(request, { error: "The database is not connected to the Worker yet." }, 503);
   const post = request.method === "POST";
@@ -583,6 +583,14 @@ async function handleTeam(request, env, b, c) {
   }
 
   if (b === "tracking" && /^\d{3,6}$/.test(c || "")) {              // latest known position of each tracked rider
+    const { data: cal } = await getCalendar(ctx);
+    const ride = cal.rides.find(r => String(r.id) === c);
+    if (!ride) return json(request, { positions: [] }, 200, { "Cache-Control": "no-store" });
+    const { data: ev } = await getEvent(c, ctx);
+    const t = (ev.startTime || "").match(/(\d{1,2}):(\d{2})/);
+    const start = Date.parse(`${ride.date}T${t ? `${pad2(t[1])}:${t[2]}` : "06:00"}:00+05:30`);
+    const end = start + (LIMIT_H[ride.distance] ?? 24) * 3600e3;
+    if (Date.now() >= end) return json(request, { positions: [] }, 200, { "Cache-Control": "no-store" });
     const { results } = await d.prepare(
       "SELECT p.air, p.ts, p.lat, p.lon, p.speed, p.batt, COALESCE(g.km, 0) AS km FROM positions p JOIN (SELECT air, MAX(ts) AS m FROM positions WHERE ride_id = ? GROUP BY air) x ON p.air = x.air AND p.ts = x.m LEFT JOIN rider_progress g ON g.ride_id=p.ride_id AND g.air=p.air WHERE p.ride_id = ?"
     ).bind(c, c).all();
@@ -707,7 +715,7 @@ export default {
 
     try {
       if (a === "track") return await handleTrack(request, env, ctx, url);
-      if (a === "team") return await handleTeam(request, env, b, c);
+      if (a === "team") return await handleTeam(request, env, b, c, ctx);
       if (a === "crossings" && /^\d{3,6}$/.test(b || "")) return await handleCrossings(request, env, b);
       if (request.method !== "GET") return json(request, { error: "Method not allowed" }, 405);
       if (a === "calendar") {
