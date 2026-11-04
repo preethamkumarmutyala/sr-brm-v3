@@ -1,7 +1,7 @@
 {
   "name": "SR BRM Dashboard",
   "short_name": "SR BRM",
-  "description": "Secunderabad Randonneurs: this week's rides, riders and results in one place",
+  "description": "Secunderabad Randonneurs: rides, riders and results in one place",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

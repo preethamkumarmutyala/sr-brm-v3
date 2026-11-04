@@ -96,7 +96,7 @@ function rideWindow(r) {                  // start and end (ms, Indian time): ri
 function rideStatus(r) {
   if (!r.id) return (r.date < todayIST() || CANCELLED.includes(r.date)) ? { k: "cancel", t: "Event cancelled" } : { k: "soon", t: "Registration not opened" };
   const [start, end] = rideWindow(r), now = Date.now();
-  if (now > end) return { k: "done", t: "Completed" };
+  if (now >= end) return { k: "done", t: "Completed" };
   if (now >= start) return { k: "ongoing", t: "Ongoing" };
   const ev = cache[r.id];
   if (!ev) return { k: "load", t: failed.has(r.id) ? "Couldn't load" : "Checking…" };
@@ -194,10 +194,10 @@ async function api(path, body) {          // talks to the Worker; sends the team
   if (!res.ok) throw new Error(j.error || "Server returned " + res.status);
   return j;
 }
-const crossCache = {}, markCache = {};
+const crossCache = {}, markCache = {}, progressCache = {};
 async function fetchCrossings(id, force) {
   if (!force && crossCache[id]) return crossCache[id];
-  try { const j = await api(`/crossings/${id}`); crossCache[id] = j.crossings || []; markCache[id] = j.marks || []; } catch (_) { crossCache[id] = crossCache[id] || []; }
+  try { const j = await api(`/crossings/${id}`); crossCache[id] = j.crossings || []; markCache[id] = j.marks || []; progressCache[id] = j.progress || []; } catch (_) { crossCache[id] = crossCache[id] || []; }
   return crossCache[id];
 }
 const sameAir = (a, b) => String(a).trim().replace(/^0+/, "") === String(b).trim().replace(/^0+/, "");
@@ -208,9 +208,9 @@ const clockOf = (ts, rideDate) => {       // "08:41 AM", or "D2 03:10 AM" after 
 };
 const closeMs = (c, date) => { const m = (c.close || "").match(/D(\d)\s+(\d{1,2}):(\d{2})/); return m ? Date.parse(`${date}T${pad2(m[2])}:${m[3]}:00+05:30`) + (Number(m[1]) - 1) * 864e5 : null; };
 
-function boardHtml(ev, route, cr, rideDate) {       // who has reached which control (times recorded by the team)
+function boardHtml(ev, route, cr, rideDate, gps = []) {       // team checkpoints plus consented GPS distance, without public coordinates
   const ctl = route?.controls || [];
-  if (!cr.length) return `<p class="note">No control times have been recorded yet. Our team notes the time each rider reaches a control, and it shows up here.</p>`;
+  if (!cr.length && !gps.length) return `<p class="note">No control times or GPS distance updates have been recorded yet.</p>`;
   const idx = no => ctl.findIndex((c, k) => cno(c, k) === Number(no));
   const kmOf = no => (idx(no) < 0 ? NaN : Number(ctl[idx(no)].km));
   const ctlName = no => (idx(no) < 0 ? `Control ${no}` : ctl[idx(no)].location);
@@ -218,19 +218,23 @@ function boardHtml(ev, route, cr, rideDate) {       // who has reached which con
   const total = Number(route?.info?.distance) || Number(ctl[ctl.length - 1]?.km) || 0;
   const byAir = {};
   for (const x of cr) (byAir[x.air] ||= []).push(x);
-  const rows = Object.entries(byAir).map(([air, list]) => {
-    const last = list.reduce((a, b) => ((kmOf(b.no) || 0) > (kmOf(a.no) || 0) ? b : a));
-    return { air, last, km: kmOf(last.no) };
-  }).sort((a, b) => (b.km || 0) - (a.km || 0) || a.last.ts - b.last.ts);
-  const body = rows.map(r => `<tr><td>${esc(nameOf(r.air))}</td><td>${esc(ctlName(r.last.no))}</td>
-    <td class="num">${isFinite(r.km) ? esc(km2(r.km)) + " km" : ""}${total && isFinite(r.km) ? `<div class="kmbar"><i style="--p:${Math.min(100, Math.round((r.km / total) * 100))}%"></i></div>` : ""}</td>
-    <td class="num">${esc(clockOf(r.last.ts, rideDate))}</td></tr>`).join("");
+  const gpsOf = air => gps.find(x => sameAir(x.air, air));
+  const airs = new Set([...Object.keys(byAir), ...gps.map(x => x.air)]);
+  const rows = [...airs].map(air => {
+    const list = byAir[air] || [], last = list.length ? list.reduce((a, b) => ((kmOf(b.no) || 0) > (kmOf(a.no) || 0) ? b : a)) : null;
+    return { air, last, km: last ? kmOf(last.no) : NaN, gps: gpsOf(air) };
+  }).sort((a, b) => ((b.gps?.km || 0) - (a.gps?.km || 0)) || ((b.km || 0) - (a.km || 0)));
+  const body = rows.map(r => `<tr><td>${esc(nameOf(r.air))}</td><td>${r.last ? esc(ctlName(r.last.no)) : "Not checked in"}</td>
+    <td class="num">${r.last && isFinite(r.km) ? esc(km2(r.km)) + " km" : "—"}${total && isFinite(r.km) ? `<div class="kmbar"><i style="--p:${Math.min(100, Math.round((r.km / total) * 100))}%"></i></div>` : ""}</td>
+    <td class="num">${r.gps ? `~${esc(km2(r.gps.km))} km` : "—"}</td>
+    <td class="num">${r.last ? esc(clockOf(r.last.ts, rideDate)) : "—"}</td>
+    <td class="num">${r.gps ? esc(clockOf(r.gps.ts, rideDate)) : "—"}</td></tr>`).join("");
   const each = ctl.map((c, i) => {
     const here = cr.filter(x => Number(x.no) === cno(c, i)).sort((a, b) => a.ts - b.ts);
     return here.length ? `<div class="ctlrow"><b>${esc(km2(c.km))} km, ${esc(c.location)}</b><span>${here.map(x => `${esc(clockOf(x.ts, rideDate))} ${esc(nameOf(x.air))}`).join("<br>")}</span></div>` : "";
   }).join("");
-  return `<p class="note">Updated by the organising team at the controls. Km done is the distance of the last control a rider has crossed.</p>
-    ${table(["Rider", "Last control", ["Km done", "num"], ["Time", "num"]], body)}
+  return `<p class="note">Checkpoint times are entered by the organising team. GPS km is an approximate distance from consented location updates; exact locations are visible to the team only.</p>
+    ${table(["Rider", "Last control", ["Checkpoint km", "num"], ["GPS km approx.", "num"], ["CP time", "num"], ["GPS update", "num"]], body)}
     ${each ? `<details class="inner"><summary>Times at each control</summary>${each}</details>` : ""}`;
 }
 
@@ -373,7 +377,7 @@ function renderDetail() {
       <div class="scroll"><table>
         <thead><tr><th>#</th><th>Rider</th><th>AIR no.</th><th>Club</th><th>Fee paid</th><th>Medal</th><th>Result</th><th>Status</th></tr></thead>
         <tbody id="rows"></tbody></table></div>`)}
-    ${cr.length || status.k === "ongoing" ? sec("live", "Live control board", cr.length ? new Set(cr.map(x => x.air)).size : null, boardHtml(ev, route, cr, ev.date || ride.date), secOpen.live ?? status.k === "ongoing") : ""}
+    ${cr.length || progressCache[current]?.length || status.k === "ongoing" ? sec("live", "Live control board", new Set([...cr.map(x => x.air), ...(progressCache[current] || []).map(x => x.air)]).size || null, boardHtml(ev, route, cr, ev.date || ride.date, progressCache[current] || []), secOpen.live ?? status.k === "ongoing") : ""}
     ${controls ? sec("controls", "Controls (check-points)", ctl.length, table(controlHeads, controls)) : ""}
     ${cues ? sec("cue", "Cue sheet (turn by turn)", cue.length, table(cueHeads, cues)) : (route === null ? '<p class="note">Controls and cue sheet are not on Audax yet.</p>' : "")}`;
 
@@ -457,9 +461,10 @@ async function loadDetails(ids) {         // fills in names, rider counts and st
   };
   await Promise.all([lane(), lane(), lane()]);
 }
-function monthGroups(list) {              // cards under month headings (list is in date order)
+function monthGroups(list, descending = false) { // month groups and cards follow calendar order; past history can be newest first
   let html = "", key = "";
-  for (const r of list) {
+  const ordered = list.slice().sort((a, b) => descending ? byDate(b, a) : byDate(a, b));
+  for (const r of ordered) {
     const k = r.date.slice(0, 7);
     if (k !== key) {
       if (key) html += "</div>";
@@ -473,25 +478,27 @@ function monthGroups(list) {              // cards under month headings (list is
 }
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-// NOW: this month's rides sorted by what matters today
+// NOW: all upcoming rides first, followed by this season's completed months in reverse calendar order.
 function renderDashboard() {
   const today = todayIST(), f = dateParts(today);
-  const list = rides.filter(r => r.date.slice(0, 7) === today.slice(0, 7));
   const k = r => rideStatus(r).k;
-  const groups = [
-    ["Happening now", list.filter(r => k(r) === "ongoing")],
-    ["Coming up this month", list.filter(r => ["open", "closed", "load", "soon"].includes(k(r)))],
-    ["Completed this month", list.filter(r => k(r) === "done")],
-    ["Cancelled", list.filter(r => k(r) === "cancel")]
-  ];
-  let html = `<h2>Now</h2><p class="note">Today is ${f.wd} ${f.d} ${MON[f.m - 1]} ${f.y}. ` +
-    (list.length ? groups.filter(g => g[1].length).map(g => `${g[1].length} ${g[0].toLowerCase()}`).join(", ") + "." : "There are no rides this month.") + `</p>`;
+  const happening = rides.filter(r => k(r) === "ongoing").sort(byDate);
+  const upcoming = rides.filter(r => r.date >= today && !["ongoing", "done", "cancel"].includes(k(r))).sort(byDate);
+  const cancelled = rides.filter(r => r.date >= today && k(r) === "cancel").sort(byDate);
+  const past = rides.filter(r => r.date.startsWith(String(f.y)) && r.date < today && k(r) !== "ongoing");
+  const thisYearDoneToday = rides.filter(r => r.date.startsWith(String(f.y)) && r.date === today && k(r) === "done");
+  const history = [...past, ...thisYearDoneToday];
+  let html = `<h2>Upcoming rides</h2><p class="note">Today is ${f.wd} ${f.d} ${MON[f.m - 1]} ${f.y}. ` +
+    `${plural(happening.length, "ride happening now", "rides happening now")}, ${plural(upcoming.length, "upcoming ride", "upcoming rides")}, and ${plural(history.length, "earlier ride this season", "earlier rides this season")}.</p>`;
   if (calendarNote) html += `<p class="note error">${esc(calendarNote)}</p>`;
-  for (const [title, items] of groups) if (items.length) html += `<h3 class="sec">${title}</h3><div class="rides">${items.map(cardHtml).join("")}</div>`;
-  const next = rides.find(r => r.date.slice(0, 7) > today.slice(0, 7));
-  if (next) { const n = dateParts(next.date); html += `<p class="note">After this month: ${n.wd} ${n.d} ${MON[n.m - 1]} ${n.y}, ${esc(kmLabel(next.distance))} (${esc(rideStatus(next).t.toLowerCase())}).</p>`; }
+  if (happening.length) html += `<h3 class="sec">Happening now</h3><div class="rides">${happening.map(cardHtml).join("")}</div>`;
+  if (upcoming.length) html += monthGroups(upcoming);
+  else html += `<p class="note">There are no upcoming rides on the calendar.</p>`;
+  if (history.length) html += `<h3 class="sec">Earlier rides this season</h3>${monthGroups(history, true)}`;
+  if (cancelled.length) html += `<h3 class="sec">Cancelled</h3>${monthGroups(cancelled)}`;
+  const near = rides.filter(r => r.id && Math.abs(dayDiff(r.date)) <= 45).map(r => r.id);
   detailEl.innerHTML = html;
-  loadDetails(list.filter(r => r.id).map(r => r.id));
+  loadDetails(near);
 }
 
 // SEASON: every ride of one year, with tap-to-filter summary, month strip and distance chips
@@ -625,6 +632,7 @@ async function ask() {
 // ---------- team area (hidden address: #team) ----------
 let desk = { tab: "desk", ride: "", control: "", q: "", sel: "", mode: "type", extra: [] };
 let teamTimer = null;
+let teamMapInstance = null;
 const tripLabel = r => { const f = dateParts(r.date); return `${f.wd} ${f.d} ${MON[f.m - 1]}, ${kmLabel(r.distance)}`; };
 const clockNow = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(11, 16);
 const parseClock = v => {
@@ -639,10 +647,10 @@ const trackMsg = (code, name) => `Hello${name ? " " + name.split(" ")[0] : ""}! 
 2) In the app set:
    Device identifier: ${code}
    Server URL: ${API_BASE}/track
-   Frequency: 600 (seconds, which is every 10 minutes)
+   Frequency: ${API_BASE.includes("-staging") ? "30 (seconds, for this staging test)" : "120 (seconds, about every 2 minutes)"}
 3) Allow location "Always" (on Android also allow background use and no battery limit).
-4) Switch tracking ON before the start and OFF after you finish.
-Only the organising team can see your location, and only during your registered ride.`;
+4) Switch tracking ON before the start. The server begins saving positions after the team records your start at CP1; it stops after the final control or if the team marks DNS/DNF.
+Only the organising team can see your exact location. Approximate GPS km is shown on the public ride page. ${API_BASE.includes("-staging") ? "Staging test data goes to the isolated staging database." : "Location records are kept for up to 30 days."}`;
 
 function storeTeam(j) { localStorage.setItem(TEAM_KEY, JSON.stringify({ email: j.email, role: j.role, token: j.token, exp: Date.now() + 11.5 * 3600e3 })); }
 function renderLogin(msg = "") {
@@ -673,6 +681,7 @@ function renderLogin(msg = "") {
 
 async function renderTeam() {
   clearInterval(teamTimer);
+  teamMapInstance?.remove(); teamMapInstance = null;
   const t = getTeam();
   if (!t) return renderLogin();
     const opts = rides.filter(r => r.id).slice().sort(byDate); // all calendar events are available for review and corrections
@@ -816,26 +825,116 @@ async function setMark(sel) {
   renderDesk();
 }
 
+function simplifyTrack(points, maxPoints = 2500) {
+  if (points.length <= maxPoints) return points;
+  const meanLat = points.reduce((sum, p) => sum + p[0], 0) / points.length, cos = Math.cos(meanLat * Math.PI / 180);
+  const xy = points.map(p => [p[1] * cos, p[0]]);
+  const distanceToSegmentSq = (p, a, b) => {
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    if (!dx && !dy) return (p[0] - a[0]) ** 2 + (p[1] - a[1]) ** 2;
+    const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy)));
+    return (p[0] - (a[0] + t * dx)) ** 2 + (p[1] - (a[1] + t * dy)) ** 2;
+  };
+  const simplify = tolerance => {
+    const keep = new Uint8Array(points.length), stack = [[0, points.length - 1]];
+    keep[0] = keep[points.length - 1] = 1;
+    while (stack.length) {
+      const [first, last] = stack.pop(); let max = tolerance * tolerance, at = -1;
+      for (let i = first + 1; i < last; i++) { const d = distanceToSegmentSq(xy[i], xy[first], xy[last]); if (d > max) { max = d; at = i; } }
+      if (at > 0) { keep[at] = 1; stack.push([first, at], [at, last]); }
+    }
+    return points.filter((_, i) => keep[i]);
+  };
+  for (const tolerance of [.00003, .00006, .00012, .00024, .00048, .00096, .00192, .00384, .00768]) {
+    const out = simplify(tolerance); if (out.length <= maxPoints) return out;
+  }
+  const stride = (points.length - 1) / (maxPoints - 1);
+  return Array.from({ length: maxPoints }, (_, i) => points[Math.round(i * stride)]);
+}
+
+function distanceToRouteKm(point, route) {
+  if (!route || route.length < 2) return null;
+  const lat = point[0], lon = point[1], cos = Math.cos(lat * Math.PI / 180), scaleX = 111.32 * cos, scaleY = 110.57;
+  const xy = p => [(p[1] - lon) * scaleX, (p[0] - lat) * scaleY];
+  let best = Infinity;
+  for (let i = 1; i < route.length; i++) {
+    const a = xy(route[i - 1]), b = xy(route[i]), dx = b[0] - a[0], dy = b[1] - a[1];
+    const t = Math.max(0, Math.min(1, -(a[0] * dx + a[1] * dy) / (dx * dx + dy * dy || 1)));
+    best = Math.min(best, Math.hypot(a[0] + t * dx, a[1] + t * dy));
+  }
+  return best;
+}
+
+function drawTeamMap(positions, riders, route, selectedAir) {
+  const host = document.getElementById("teamMap");
+  if (!host || !window.L) return;
+  const map = L.map(host, { scrollWheelZoom: true });
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>' }).addTo(map);
+  const bounds = [];
+  if (route?.points?.length > 1) {
+    L.polyline(route.points, { color: "#d84315", weight: 5, opacity: .82 }).addTo(map).bindTooltip("Official GPX route");
+    bounds.push(...route.points);
+  }
+  const byAir = new Map(riders.map(r => [String(r.air).replace(/^0+/, ""), r]));
+  for (const p of positions) {
+    const rider = byAir.get(String(p.air).replace(/^0+/, "")), name = rider?.name || `AIR ${p.air}`, deviation = distanceToRouteKm([p.lat, p.lon], route?.points), off = deviation != null && deviation > 1;
+    const dot = L.divIcon({ className: "", html: `<span class="rider-dot ${off ? "offroute" : "onroute"}"></span>`, iconSize: [18, 18], iconAnchor: [9, 9] });
+    const marker = L.marker([p.lat, p.lon], { icon: dot }).addTo(map);
+    marker.bindTooltip(`${esc(name)} · AIR ${esc(p.air)}`, { direction: "top", offset: [0, -8], opacity: .98 });
+    const details = `<b>${esc(name)}</b><br>AIR ${esc(p.air)}<br>GPS distance: ~${esc(km2(p.km || 0))} km${deviation != null ? `<br>${off ? "Possibly off route" : "Near route"}: ${esc(km2(deviation))} km from line` : ""}<br>Last update: ${esc(new Date(p.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}`;
+    marker.bindPopup(details);
+    if (selectedAir && sameAir(p.air, selectedAir)) marker.openPopup();
+    bounds.push([p.lat, p.lon]);
+  }
+  if (bounds.length > 1) map.fitBounds(bounds, { padding: [28, 28], maxZoom: 13 });
+  else if (bounds.length === 1) map.setView(bounds[0], 13);
+  else map.setView([17.385, 78.4867], 10);
+  return map;
+}
+
 async function renderTrackAdmin() {
-  const [codes, tr] = await Promise.all([api("/team/codes"), api(`/team/tracking/${desk.ride}`)]);
+  const [codes, tr, routeData] = await Promise.all([api("/team/codes"), api(`/team/tracking/${desk.ride}`), api(`/team/route/${desk.ride}`)]);
   const body = document.getElementById("deskBody");
   if (!body || current !== "team") return;
   const ev = cache[desk.ride], ride = rides.find(r => r.id === desk.ride), live = ride && rideStatus(ride).k === "ongoing";
   const codeOf = air => codes.codes.find(c => sameAir(c.air, air)), posOf = air => tr.positions.find(p => sameAir(p.air, air));
+  const route = routeData.route, riders = ev?.riders || [], positioned = tr.positions.filter(p => riders.some(r => sameAir(r.air, p.air)) || desk.ride === "999999");
   const ago = ts => { const m = Math.max(0, Math.round((Date.now() - ts) / 60000)); return m < 60 ? `${m} min ago` : `${Math.floor(m / 60)}h ${m % 60}m ago`; };
-  const rows = (ev?.riders || []).slice().sort((a, b) => a.name.localeCompare(b.name)).map(r => {
+  const rows = riders.slice().sort((a, b) => a.name.localeCompare(b.name)).map(r => {
     const c = codeOf(r.air), p = posOf(r.air), quiet = c && live && (!p || Date.now() - p.ts > 30 * 60e3);
     return `<div class="trow"><div class="tname"><b>${esc(r.name)}</b><small>AIR ${esc(r.air)}</small></div><div class="tact">
       ${c ? `<code class="code">${esc(c.token)}</code><button type="button" class="linkbtn" data-team="copy" data-code="${esc(c.token)}" data-name="${esc(r.name)}">Copy message</button>`
           : `<button type="button" class="btn alt" data-team="code" data-air="${esc(r.air)}" data-name="${esc(r.name)}">Make code</button>`}
-      ${p ? `<button type="button" class="linkbtn" data-team="pick" data-air="${esc(r.air)}">${esc(ago(p.ts))}${p.batt != null ? `, battery ${Math.round(p.batt)}%` : ""}</button>` : (c ? '<span class="chip load">No signal yet</span>' : "")}
+      ${p ? `<button type="button" class="linkbtn" data-team="pick" data-air="${esc(r.air)}">~${esc(km2(p.km))} km · ${esc(ago(p.ts))}${p.batt != null ? `, battery ${Math.round(p.batt)}%` : ""}</button>` : (c ? '<span class="chip load">No signal yet</span>' : "")}
       ${quiet ? '<span class="chip closed">Silent over 30 min</span>' : ""}</div></div>`;
   }).join("");
-  const sel = desk.sel && posOf(desk.sel);
-  body.innerHTML = `<p class="note">Riders who agree to be tracked get a personal code. Their location is only kept while they are registered for a ride that is on, and only the team can see it.</p>
-    ${sel ? `<div class="tmap"><iframe class="map" title="Rider location" src="https://www.google.com/maps?q=${sel.lat},${sel.lon}&z=15&output=embed"></iframe>
-      <p class="note">Last seen ${esc(ago(sel.ts))}${sel.speed != null ? `, ${Math.round(sel.speed)} km/h` : ""}. <a href="https://www.google.com/maps?q=${sel.lat},${sel.lon}" target="_blank" rel="noopener">Open in Google Maps</a></p></div>` : ""}
+  const routeMsg = route ? `GPX route loaded (${route.pointCount.toLocaleString()} points).` : "No GPX route uploaded for this ride yet.";
+  body.innerHTML = `<p class="note">GPS starts after the team records CP1 and stops after the final control, DNS, or DNF. This live map is team-only; the public ride page shows only approximate GPS km.</p>
+    <div class="team-map-tools">${getTeam()?.role === "admin" ? '<label class="btn alt" for="gpxRouteFile">Upload GPX Track</label><input id="gpxRouteFile" type="file" accept=".gpx,application/gpx+xml" hidden>' : ""}<span id="gpxStatus" class="gpx-status">${esc(routeMsg)}</span><span class="chip">${positioned.length} rider${positioned.length === 1 ? "" : "s"} on map</span></div>
+    <p class="team-map-note">Hover a marker for rider name and AIR number; tap or click for distance and update time. Red markers are more than 1 km from the uploaded route and should be checked with the rider.</p>
+    <div id="teamMap" role="img" aria-label="Live map showing rider positions and the uploaded GPX route"></div>
     <div class="trows">${rows || '<p class="note">No registered riders yet.</p>'}</div>`;
+  teamMapInstance = drawTeamMap(positioned, riders, route, desk.sel);
+  const upload = document.getElementById("gpxRouteFile");
+  upload?.addEventListener("change", async e => {
+    const file = e.target.files?.[0]; if (!file) return;
+    const status = document.getElementById("gpxStatus");
+    try {
+      if (file.size > 15 * 1024 * 1024) throw new Error("Choose a GPX file smaller than 15 MB.");
+      const xml = new DOMParser().parseFromString(await file.text(), "application/xml");
+      if (xml.querySelector("parsererror")) throw new Error("That file is not valid GPX/XML.");
+      const trackPoints = [...xml.getElementsByTagName("trkpt")].map(p => [p.getAttribute("lat"), p.getAttribute("lon")])
+        .filter(p => p[0] !== null && p[1] !== null && p[0] !== "" && p[1] !== "")
+        .map(p => [Number(p[0]), Number(p[1])]).filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]) && Math.abs(p[0]) <= 90 && Math.abs(p[1]) <= 180);
+      if (trackPoints.length < 2) throw new Error("This GPX has no route track points. Export GPX Track (the route line), not GPX Route (which may contain only cue points).");
+      const points = simplifyTrack(trackPoints);
+      status.textContent = `Saving ${file.name}…`;
+      const result = await api(`/team/route/${desk.ride}`, { points });
+      status.textContent = `${file.name} saved (${result.pointCount.toLocaleString()} route points).`;
+      desk.sel = ""; await renderTeam();
+    } catch (err) { status.textContent = err.message; }
+    finally { e.target.value = ""; }
+  });
   teamTimer = setInterval(() => { if (current === "team" && desk.tab === "track" && document.activeElement?.tagName !== "INPUT") renderTeam(); }, 60000);
 }
 
@@ -923,12 +1022,13 @@ setInterval(async () => {
   else if (isList(current)) renderCurrentList();
 }, REFRESH_MS);
 
-setInterval(async () => {                 // while a ride is on, check for new control times every minute
-  if (!cache[current] || document.activeElement?.tagName === "INPUT") return;
-  const r = rides.find(x => x.id === current);
-  if (!r || rideStatus(r).k !== "ongoing") return;
-  await fetchCrossings(current, true);
-  renderDetail();
+setInterval(async () => {                 // update ride expiry and control information within a minute
+  if (document.activeElement?.tagName === "INPUT") return;
+  if (isList(current)) { renderCurrentList(); return; }
+  if (!cache[current]) return;
+  const id = current, r = rides.find(x => x.id === id);
+  if (r && rideStatus(r).k === "ongoing") await fetchCrossings(id, true);
+  if (current === id && cache[id]) renderDetail();
 }, 60 * 1000);
 
 (async () => {
