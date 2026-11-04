@@ -18,16 +18,17 @@ const YEARS_AHEAD = 1;                         // upcoming rides: this many year
 const LEGACY = { "600": "10047", "200": "10048", "300": "10049", "400": "10050" };
 const TEST_RIDE_ID = "999999";
 const TEST_AIR = "0949";
+// Keep this staging-only test event fixed so it expires once, instead of moving to "now" on every request.
+const TEST_RIDE_DATE = "2026-11-03";
+const TEST_RIDE_START = "06:55";
 
 function virtualTestEvent() {
-  const now = new Date(Date.now() - 10 * 60e3 + 5.5 * 3600e3);
-  const date = now.toISOString().slice(0, 10), [year, month, day] = date.split("-");
-  const startTime = now.toISOString().slice(11, 16);
+  const date = TEST_RIDE_DATE, [year, month, day] = date.split("-");
   const monthName = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(month) - 1];
   return {
     id: TEST_RIDE_ID, year: Number(year), month: Number(month), day: Number(day), date,
     distance: "24.64", title: `Staging home–college–home GPS test on ${Number(day)}-${monthName}-${year}`,
-    rideName: "Preetham's staging home–college–home test", registrationClose: "", startTime,
+    rideName: "Preetham's staging home–college–home test", registrationClose: "", startTime: TEST_RIDE_START,
     startLocation: "Private staging test start", routeMap: "", calendarId: TEST_RIDE_ID, routeId: "",
     riderCount: 1, riders: [{ seq: "1", name: "Preetham Kumar", air: TEST_AIR, fee: "", medal: "", result: "", club: "Staging" }],
     fetchedAt: new Date().toISOString()
@@ -615,7 +616,7 @@ async function activeRideFor(air, ctx) {
     const t = (ev.startTime || "").match(/(\d{1,2}):(\d{2})/);
     const start = Date.parse(`${r.date}T${t ? `${pad2(t[1])}:${t[2]}` : "06:00"}:00+05:30`);
     const end = start + (LIMIT_H[r.distance] ?? 24) * 3600e3;
-    if (now < start - 3 * 3600e3 || now > end + 3 * 3600e3) continue;
+    if (now < start - 3 * 3600e3 || now >= end) continue;
     if ((ev.riders || []).some(x => sameAir(x.air, air))) return { id: r.id };
   }
   return null;
@@ -663,9 +664,7 @@ async function handleTrack(request, env, ctx, url) {
   if (!token || !isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return ok();
   const rider = await d.prepare("SELECT air FROM tracking_codes WHERE token = ? AND active = 1").bind(token).first();
   if (!rider) return ok();
-  const ride = env.STAGING_MODE === "true" && rider.air === TEST_AIR
-    ? { id: TEST_RIDE_ID }
-    : await activeRideFor(rider.air, ctx);
+  const ride = await activeRideFor(rider.air, ctx);
   if (!ride) return ok();                                          // not registered for a ride that is on now: nothing is kept
   if (!(await trackingEnabled(d, env, ride.id, rider.air, ctx))) return ok();
 

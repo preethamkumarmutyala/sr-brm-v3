@@ -96,7 +96,7 @@ function rideWindow(r) {                  // start and end (ms, Indian time): ri
 function rideStatus(r) {
   if (!r.id) return (r.date < todayIST() || CANCELLED.includes(r.date)) ? { k: "cancel", t: "Event cancelled" } : { k: "soon", t: "Registration not opened" };
   const [start, end] = rideWindow(r), now = Date.now();
-  if (now > end) return { k: "done", t: "Completed" };
+  if (now >= end) return { k: "done", t: "Completed" };
   if (now >= start) return { k: "ongoing", t: "Ongoing" };
   const ev = cache[r.id];
   if (!ev) return { k: "load", t: failed.has(r.id) ? "Couldn't load" : "Checking…" };
@@ -461,9 +461,10 @@ async function loadDetails(ids) {         // fills in names, rider counts and st
   };
   await Promise.all([lane(), lane(), lane()]);
 }
-function monthGroups(list) {              // cards under month headings (list is in date order)
+function monthGroups(list, descending = false) { // month groups and cards follow calendar order; past history can be newest first
   let html = "", key = "";
-  for (const r of list) {
+  const ordered = list.slice().sort((a, b) => descending ? byDate(b, a) : byDate(a, b));
+  for (const r of ordered) {
     const k = r.date.slice(0, 7);
     if (k !== key) {
       if (key) html += "</div>";
@@ -477,25 +478,25 @@ function monthGroups(list) {              // cards under month headings (list is
 }
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-// NOW: this month's rides sorted by what matters today
+// NOW: all upcoming rides first, followed by this season's completed months in reverse calendar order.
 function renderDashboard() {
   const today = todayIST(), f = dateParts(today);
-  const list = rides.filter(r => r.date.slice(0, 7) === today.slice(0, 7));
   const k = r => rideStatus(r).k;
-  const groups = [
-    ["Happening now", list.filter(r => k(r) === "ongoing")],
-    ["Coming up this month", list.filter(r => ["open", "closed", "load", "soon"].includes(k(r)))],
-    ["Completed this month", list.filter(r => k(r) === "done")],
-    ["Cancelled", list.filter(r => k(r) === "cancel")]
-  ];
-  let html = `<h2>Now</h2><p class="note">Today is ${f.wd} ${f.d} ${MON[f.m - 1]} ${f.y}. ` +
-    (list.length ? groups.filter(g => g[1].length).map(g => `${g[1].length} ${g[0].toLowerCase()}`).join(", ") + "." : "There are no rides this month.") + `</p>`;
+  const happening = rides.filter(r => k(r) === "ongoing").sort(byDate);
+  const upcoming = rides.filter(r => r.date >= today && !["ongoing", "done"].includes(k(r))).sort(byDate);
+  const past = rides.filter(r => r.date.startsWith(String(f.y)) && r.date < today && k(r) !== "ongoing");
+  const thisYearDoneToday = rides.filter(r => r.date.startsWith(String(f.y)) && r.date === today && k(r) === "done");
+  const history = [...past, ...thisYearDoneToday];
+  let html = `<h2>Upcoming rides</h2><p class="note">Today is ${f.wd} ${f.d} ${MON[f.m - 1]} ${f.y}. ` +
+    `${plural(happening.length, "ride happening now", "rides happening now")}, ${plural(upcoming.length, "upcoming ride", "upcoming rides")}, and ${plural(history.length, "earlier ride this season", "earlier rides this season")}.</p>`;
   if (calendarNote) html += `<p class="note error">${esc(calendarNote)}</p>`;
-  for (const [title, items] of groups) if (items.length) html += `<h3 class="sec">${title}</h3><div class="rides">${items.map(cardHtml).join("")}</div>`;
-  const next = rides.find(r => r.date.slice(0, 7) > today.slice(0, 7));
-  if (next) { const n = dateParts(next.date); html += `<p class="note">After this month: ${n.wd} ${n.d} ${MON[n.m - 1]} ${n.y}, ${esc(kmLabel(next.distance))} (${esc(rideStatus(next).t.toLowerCase())}).</p>`; }
+  if (happening.length) html += `<h3 class="sec">Happening now</h3><div class="rides">${happening.map(cardHtml).join("")}</div>`;
+  if (upcoming.length) html += monthGroups(upcoming);
+  else html += `<p class="note">There are no upcoming rides on the calendar.</p>`;
+  if (history.length) html += `<h3 class="sec">Earlier rides this season</h3>${monthGroups(history, true)}`;
+  const near = rides.filter(r => r.id && Math.abs(dayDiff(r.date)) <= 45).map(r => r.id);
   detailEl.innerHTML = html;
-  loadDetails(list.filter(r => r.id).map(r => r.id));
+  loadDetails(near);
 }
 
 // SEASON: every ride of one year, with tap-to-filter summary, month strip and distance chips
@@ -1019,12 +1020,13 @@ setInterval(async () => {
   else if (isList(current)) renderCurrentList();
 }, REFRESH_MS);
 
-setInterval(async () => {                 // while a ride is on, check for new control times every minute
-  if (!cache[current] || document.activeElement?.tagName === "INPUT") return;
-  const r = rides.find(x => x.id === current);
-  if (!r || rideStatus(r).k !== "ongoing") return;
-  await fetchCrossings(current, true);
-  renderDetail();
+setInterval(async () => {                 // update ride expiry and control information within a minute
+  if (document.activeElement?.tagName === "INPUT") return;
+  if (isList(current)) { renderCurrentList(); return; }
+  if (!cache[current]) return;
+  const id = current, r = rides.find(x => x.id === id);
+  if (r && rideStatus(r).k === "ongoing") await fetchCrossings(id, true);
+  if (current === id && cache[id]) renderDetail();
 }, 60 * 1000);
 
 (async () => {
