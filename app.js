@@ -483,7 +483,8 @@ function renderDashboard() {
   const today = todayIST(), f = dateParts(today);
   const k = r => rideStatus(r).k;
   const happening = rides.filter(r => k(r) === "ongoing").sort(byDate);
-  const upcoming = rides.filter(r => r.date >= today && !["ongoing", "done"].includes(k(r))).sort(byDate);
+  const upcoming = rides.filter(r => r.date >= today && !["ongoing", "done", "cancel"].includes(k(r))).sort(byDate);
+  const cancelled = rides.filter(r => r.date >= today && k(r) === "cancel").sort(byDate);
   const past = rides.filter(r => r.date.startsWith(String(f.y)) && r.date < today && k(r) !== "ongoing");
   const thisYearDoneToday = rides.filter(r => r.date.startsWith(String(f.y)) && r.date === today && k(r) === "done");
   const history = [...past, ...thisYearDoneToday];
@@ -494,6 +495,7 @@ function renderDashboard() {
   if (upcoming.length) html += monthGroups(upcoming);
   else html += `<p class="note">There are no upcoming rides on the calendar.</p>`;
   if (history.length) html += `<h3 class="sec">Earlier rides this season</h3>${monthGroups(history, true)}`;
+  if (cancelled.length) html += `<h3 class="sec">Cancelled</h3>${monthGroups(cancelled)}`;
   const near = rides.filter(r => r.id && Math.abs(dayDiff(r.date)) <= 45).map(r => r.id);
   detailEl.innerHTML = html;
   loadDetails(near);
