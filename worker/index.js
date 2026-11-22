@@ -836,7 +836,7 @@ async function handleHistory(request, env, air) {
   }
   const key = airNorm(air);
   if (!/^[A-Z0-9-]{1,12}$/.test(key)) return json(request, { error: "Enter a valid AIR number" }, 400);
-  const { results } = await d.prepare("SELECT event_id, name, date, distance, club, result, medal FROM hist_results WHERE air = ? ORDER BY date DESC").bind(key).all();
+  const { results } = await d.prepare("SELECT r.event_id, r.name, r.date, r.distance, r.club, r.result, r.medal, e.club AS organiser FROM hist_results r LEFT JOIN hist_events e ON e.event_id = r.event_id WHERE r.air = ? ORDER BY r.date DESC").bind(key).all();
   const cover = await d.prepare("SELECT count(*) done, (SELECT min(date) FROM hist_events WHERE state = 'done') since, (SELECT count(*) FROM hist_events WHERE state = 'todo') todo FROM hist_events WHERE state = 'done'").first();
   const byDistance = {}, seasons = {};
   let km = 0, finished = 0, medals = 0;
@@ -849,7 +849,7 @@ async function handleHistory(request, env, air) {
     }
     if (ok && /^y/i.test(r.medal || "")) medals++;                    // Audax writes "Yes" or "No" in the medal column
     const pending = !ok && ["", "DNS"].includes(String(r.result || "").trim().toUpperCase()) && r.date >= daysAgoISO(5);   // results are filled in a few days after a ride
-    return { id: r.event_id, date: r.date, distance: dist, club: r.club, result: r.result, finished: ok, pending };
+    return { id: r.event_id, date: r.date, distance: dist, club: r.club, organiser: r.organiser || "", result: r.result, finished: ok, pending };
   });
   const seasonList = Object.entries(seasons).sort((a, b) => b[0].localeCompare(a[0])).map(([year, set]) => ({
     year, distances: [...set], sr: ["200", "300", "400", "600"].every(x => set.has(x)) }));
@@ -858,6 +858,59 @@ async function handleHistory(request, env, air) {
     superRandonneur: seasonList.filter(s => s.sr).length, byDistance, seasons: seasonList, rides,
     coverage: { ridesRead: cover.done, since: cover.since, stillToRead: cover.todo }
   }, 200, { "Cache-Control": "public, max-age=120" });
+}
+
+// ---------- club logos: read from each club's page on Audax and served through the Worker ----------
+const normKey = s => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+let clubReady = false;
+async function clubDb(env) {
+  const d = await historyDb(env);                                   // also creates hist_meta
+  if (!d) return null;
+  if (!clubReady) {
+    await d.prepare("CREATE TABLE IF NOT EXISTS club_info (club_id TEXT PRIMARY KEY, name TEXT NOT NULL, page TEXT, logo TEXT, tries INTEGER NOT NULL DEFAULT 0, scanned INTEGER)").run();
+    clubReady = true;
+  }
+  return d;
+}
+async function runClubScan(env) {
+  const d = await clubDb(env);
+  if (!d) return;
+  const listed = (await d.prepare("SELECT v FROM hist_meta WHERE k='clubs_listed'").first())?.v || 0;
+  if (Date.now() - listed > 7 * 864e5) {                             // the club list changes rarely: read it once a week
+    const html = await fetchText(`${SOURCE}/club-list.php`);
+    const stmts = [];
+    for (const m of html.matchAll(/<a\b[^>]*href=["']([^"']*-c-(\d+))["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+      const name = clean(m[3]);
+      if (name) stmts.push(d.prepare("INSERT OR IGNORE INTO club_info (club_id, name, page) VALUES (?, ?, ?)").bind(m[2], name, new URL(m[1], `${SOURCE}/`).href));
+    }
+    for (let i = 0; i < stmts.length; i += 80) await d.batch(stmts.slice(i, i + 80));
+    if (stmts.length) await d.prepare("INSERT INTO hist_meta (k, v) VALUES ('clubs_listed', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(Date.now()).run();
+  }
+  const { results } = await d.prepare("SELECT club_id, page FROM club_info WHERE logo IS NULL AND tries < 3 ORDER BY club_id LIMIT 10").all();
+  for (const c of results) {
+    try {
+      const html = await fetchText(c.page);
+      const src = (html.match(/src=["']([^"']*clublogo\/[^"']+)["']/i) || [])[1];
+      const logo = src ? new URL(src, `${SOURCE}/`).href : "";
+      await d.prepare("UPDATE club_info SET logo = ?, scanned = ? WHERE club_id = ?").bind(logo, Date.now(), c.club_id).run();
+    } catch (err) {
+      await d.prepare("UPDATE club_info SET tries = tries + 1, scanned = ? WHERE club_id = ?").bind(Date.now(), c.club_id).run();
+    }
+  }
+}
+async function handleClubLogos(request, env) {
+  const d = await clubDb(env);
+  if (!d) return json(request, { clubs: [] });
+  const { results } = await d.prepare("SELECT club_id, name FROM club_info WHERE logo IS NOT NULL AND logo != ''").all();
+  return json(request, { clubs: results.map(r => ({ id: r.club_id, key: normKey(r.name) })) }, 200, { "Cache-Control": "public, max-age=600" });
+}
+async function handleLogo(request, env, id) {
+  const d = await clubDb(env);
+  const row = d && /^\d{1,6}$/.test(id || "") ? await d.prepare("SELECT logo FROM club_info WHERE club_id = ?").bind(id).first() : null;
+  if (!row || !row.logo || !row.logo.startsWith(`${SOURCE}/clublogo/`)) return json(request, { error: "No logo" }, 404);
+  const up = await fetch(row.logo, { headers: { "User-Agent": UA } });
+  if (!up.ok) return json(request, { error: "No logo" }, 404);
+  return new Response(up.body, { status: 200, headers: { "Content-Type": up.headers.get("Content-Type") || "image/jpeg", "Cache-Control": "public, max-age=604800", ...corsHeaders(request) } });
 }
 
 // ---------- router ----------
@@ -878,6 +931,8 @@ export default {
       if (a === "crossings" && /^\d{3,6}$/.test(b || "")) return await handleCrossings(request, env, b);
       if (request.method !== "GET") return json(request, { error: "Method not allowed" }, 405);
       if (a === "history" && env.HISTORY_SCAN === "true" && b) return await handleHistory(request, env, b);
+      if (a === "clubs" && b === "logos" && env.HISTORY_SCAN === "true") return await handleClubLogos(request, env);
+      if (a === "logo" && env.HISTORY_SCAN === "true") return await handleLogo(request, env, b);
       if (a === "calendar") {
         const { data, cache } = await getCalendar(ctx);
         if (env.STAGING_MODE === "true") data.rides = [...data.rides.filter(r => r.id !== TEST_RIDE_ID), virtualTestEvent()];
@@ -916,6 +971,7 @@ export default {
   },
   async scheduled(event, env, ctx) {
     if (env.HISTORY_SCAN !== "true") return;
+    ctx.waitUntil(runClubScan(env).catch(() => {}));
     ctx.waitUntil(runHistoryScan(env, ctx).catch(() => {}));
   }
 };
