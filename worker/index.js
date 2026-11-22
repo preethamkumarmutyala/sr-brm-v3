@@ -363,7 +363,7 @@ async function cached(key, ttl, ctx, produce) {
 }
 const getEvent = (id, ctx) => cached(`ev2/${id}`, d => (d.date && d.date < daysAgoISO(2) ? 21600 : CACHE_TTL), ctx, () => scrapeEvent(id));
 const getRoute = (id, ctx) => cached(`route-v4/${id}`, ROUTE_TTL, ctx, () => scrapeRoute(id, ctx));
-const getAllClubs = ctx => cached("allclubs-v1", d => (d.errors.length ? 120 : CALENDAR_TTL), ctx, () => scrapeAllClubs());
+const getAllClubs = ctx => cached("allclubs-v2", d => (d.errors.length ? 120 : CALENDAR_TTL), ctx, () => scrapeAllClubs());
 const getCalendar = ctx => cached("calendar-v1", d => (d.errors.length ? 120 : CALENDAR_TTL), ctx, () => scrapeCalendar());
 
 // ---------- team area, control times and tracking ----------
