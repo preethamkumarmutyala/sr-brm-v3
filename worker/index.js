@@ -805,8 +805,15 @@ async function historyDb(env) {
       q("CREATE TABLE IF NOT EXISTS hist_events (event_id TEXT PRIMARY KEY, date TEXT NOT NULL, distance TEXT, club TEXT, state TEXT NOT NULL DEFAULT 'todo', tries INTEGER NOT NULL DEFAULT 0, riders INTEGER, scanned INTEGER)"),
       q("CREATE TABLE IF NOT EXISTS hist_results (air TEXT NOT NULL, event_id TEXT NOT NULL, name TEXT, date TEXT NOT NULL, distance TEXT, club TEXT, result TEXT, medal TEXT, PRIMARY KEY (air, event_id))"),
       q("CREATE INDEX IF NOT EXISTS idx_hist_air ON hist_results (air, date)"),
+      q("CREATE INDEX IF NOT EXISTS idx_hist_event ON hist_results (event_id)"),             // finding one ride's results without reading the whole table
+      q("CREATE INDEX IF NOT EXISTS idx_hist_state ON hist_events (state, date)"),            // picking the next rides to read without reading the whole table
+      q("CREATE TABLE IF NOT EXISTS hist_riders (air TEXT PRIMARY KEY, name TEXT, rides INTEGER NOT NULL, last TEXT, club TEXT)"),   // one row per rider, so searching never reads every result
       q("CREATE TABLE IF NOT EXISTS hist_meta (k TEXT PRIMARY KEY, v INTEGER NOT NULL)")
     ]);
+    if (!(await d.prepare("SELECT v FROM hist_meta WHERE k='riders_built'").first())) {      // one-time fill from the results already read
+      await d.prepare("INSERT OR REPLACE INTO hist_riders (air, name, rides, last, club) SELECT air, max(name), count(*), max(date), max(club) FROM hist_results GROUP BY air").run();
+      await d.prepare("INSERT OR REPLACE INTO hist_meta (k, v) VALUES ('riders_built', 1)").run();
+    }
     histReady = true;
   }
   return d;
@@ -849,10 +856,17 @@ async function runHistoryScan(env, ctx) {
     await d.prepare("INSERT INTO hist_meta (k, v) VALUES ('seeded', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(now).run();
   }
   await backfillYear(d);
+  if (now - ((await d.prepare("SELECT v FROM hist_meta WHERE k='cov_at'").first())?.v || 0) > 3600e3) {     // read counts once an hour instead of on every lookup
+    const c = await d.prepare("SELECT (SELECT count(*) FROM hist_events WHERE state='done') done, (SELECT count(*) FROM hist_events WHERE state='todo') todo, (SELECT min(date) FROM hist_events WHERE state='done') since").first();
+    const put = (k, v) => d.prepare("INSERT INTO hist_meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(k, v);
+    await d.batch([put("cov_done", c.done), put("cov_todo", c.todo), put("cov_since", Number((c.since || "").replace(/-/g, "")) || 0), put("cov_at", now)]);
+  }
   const recent = daysAgoISO(3);
-  const { results } = await d.prepare(
-    "SELECT event_id, date, distance, club FROM hist_events WHERE state = 'todo' OR (state = 'done' AND date >= ? AND scanned < ?) ORDER BY (state = 'todo') DESC, date DESC LIMIT ?"
-  ).bind(recent, now - 6 * 3600e3, HISTORY_BATCH).all();
+  let results = (await d.prepare("SELECT event_id, date, distance, club FROM hist_events WHERE state = 'todo' ORDER BY date DESC LIMIT ?").bind(HISTORY_BATCH).all()).results;
+  if (results.length < HISTORY_BATCH) {                               // nothing new to read: refresh rides from the last few days (results arrive late)
+    const more = (await d.prepare("SELECT event_id, date, distance, club FROM hist_events WHERE state = 'done' AND date >= ? AND scanned < ? ORDER BY date DESC LIMIT ?").bind(recent, now - 6 * 3600e3, HISTORY_BATCH - results.length).all()).results;
+    results = results.concat(more);
+  }
   for (const e of results) {
     try {
       const ev = await scrapeEvent(e.event_id);
@@ -862,6 +876,11 @@ async function runHistoryScan(env, ctx) {
         if (air) stmts.push(d.prepare("INSERT OR REPLACE INTO hist_results (air, event_id, name, date, distance, club, result, medal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
           .bind(air, e.event_id, r.name, ev.date || e.date, ev.distance || e.distance, r.club || e.club, r.result || "", r.medal || ""));
       }
+      for (const r of ev.riders) {
+        const air = airNorm(r.air);
+        if (air) stmts.push(d.prepare("INSERT INTO hist_riders (air, name, rides, last, club) VALUES (?, ?, (SELECT count(*) FROM hist_results WHERE air = ?), (SELECT max(date) FROM hist_results WHERE air = ?), ?) ON CONFLICT(air) DO UPDATE SET name = excluded.name, rides = excluded.rides, last = excluded.last, club = excluded.club")
+          .bind(air, r.name, air, air, r.club || e.club));
+      }
       stmts.push(d.prepare("UPDATE hist_events SET state = 'done', riders = ?, scanned = ? WHERE event_id = ?").bind(ev.riders.length, Date.now(), e.event_id));
       for (let i = 0; i < stmts.length; i += 80) await d.batch(stmts.slice(i, i + 80));
     } catch (err) {
@@ -869,7 +888,7 @@ async function runHistoryScan(env, ctx) {
     }
   }
 }
-async function handleHistory(request, env, air) {
+async function handleHistory(request, env, air, ctx) {
   const d = await historyDb(env);
   if (!d) return json(request, { error: "Database not ready" }, 503);
   if (air === "status") {
@@ -885,13 +904,19 @@ async function handleHistory(request, env, air) {
     const terms = q.split(/\s+/).filter(Boolean).slice(0, 4);
     const where = terms.map(() => "(name LIKE ? OR air LIKE ?)").join(" AND ");
     const args = terms.flatMap(t => [`%${t}%`, `${airNorm(t)}%`]);
-    const { results } = await d.prepare(`SELECT air, name, count(*) rides, max(date) last, club FROM hist_results WHERE ${where} GROUP BY air ORDER BY rides DESC, name LIMIT 15`).bind(...args).all();
-    return json(request, { riders: results }, 200, { "Cache-Control": "public, max-age=60" });
+    const ck = new Request(`https://cache.sr-brm.internal/hsearch/${encodeURIComponent(q.toLowerCase())}`);
+    const hit = await caches.default.match(ck);
+    if (hit) return json(request, await hit.json(), 200, { "Cache-Control": "public, max-age=300" });
+    const { results } = await d.prepare(`SELECT air, name, rides, last, club FROM hist_riders WHERE ${where} ORDER BY rides DESC, name LIMIT 15`).bind(...args).all();
+    const out = { riders: results };
+    ctx?.waitUntil?.(caches.default.put(ck, new Response(JSON.stringify(out), { headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=300" } })));
+    return json(request, out, 200, { "Cache-Control": "public, max-age=300" });
   }
   const key = airNorm(air);
   if (!/^[A-Z0-9-]{1,12}$/.test(key)) return json(request, { error: "Enter a valid AIR number" }, 400);
   const { results } = await d.prepare("SELECT r.event_id, r.name, r.date, r.distance, r.club, r.result, r.medal, e.club AS organiser FROM hist_results r LEFT JOIN hist_events e ON e.event_id = r.event_id WHERE r.air = ? ORDER BY r.date DESC").bind(key).all();
-  const cover = await d.prepare("SELECT count(*) done, (SELECT min(date) FROM hist_events WHERE state = 'done') since, (SELECT count(*) FROM hist_events WHERE state = 'todo') todo FROM hist_events WHERE state = 'done'").first();
+  const mv = async k => (await d.prepare("SELECT v FROM hist_meta WHERE k=?").bind(k).first())?.v || 0;
+  const sinceN = await mv("cov_since"), cover = { done: await mv("cov_done"), todo: await mv("cov_todo"), since: sinceN ? `${String(sinceN).slice(0, 4)}-${String(sinceN).slice(4, 6)}-${String(sinceN).slice(6)}` : null };
   const byDistance = {}, seasons = {};
   let km = 0, finished = 0, medals = 0;
   const rides = results.map(r => {
@@ -984,7 +1009,7 @@ export default {
       if (a === "team") return await handleTeam(request, env, b, c, ctx);
       if (a === "crossings" && /^\d{3,6}$/.test(b || "")) return await handleCrossings(request, env, b);
       if (request.method !== "GET") return json(request, { error: "Method not allowed" }, 405);
-      if (a === "history" && env.HISTORY_SCAN === "true" && b) return await handleHistory(request, env, b);
+      if (a === "history" && env.HISTORY_SCAN === "true" && b) return await handleHistory(request, env, b, ctx);
       if (a === "clubs" && b === "logos" && env.HISTORY_SCAN === "true") return await handleClubLogos(request, env);
       if (a === "logo" && env.HISTORY_SCAN === "true") return await handleLogo(request, env, b);
       if (a === "calendar") {
