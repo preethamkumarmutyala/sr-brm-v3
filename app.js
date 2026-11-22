@@ -271,7 +271,7 @@ const isSeason = v => /^y\d{4}$/.test(v || "");
 const isList = v => v === "dashboard" || v === "past" || isSeason(v);
 const thisYear = () => Number(todayIST().slice(0, 4));
 const navKey = v => (isSeason(v) && Number(v.slice(1)) < thisYear() ? "past" : v);     // old seasons all light up "Past seasons"
-const lit = () => (current === "team" ? "" : navKey(isList(current) || current === "sr" || current === "india" || current === "assistant" ? current : origin));
+const lit = () => (current === "team" ? "" : navKey(isList(current) || current === "sr" || current === "india" || current === "me" || current === "assistant" ? current : origin));
 const ICONS = {
   now: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   cur: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/>',
@@ -1129,6 +1129,45 @@ detailEl.addEventListener("input", e => {
   renderIndia().then?.(() => { const i = document.getElementById("indSearch"); if (i) { i.focus(); i.setSelectionRange(pos, pos); } });
 });
 
+// ---------- My rides: a rider's own history from public Audax results, looked up by AIR number ----------
+let meAir = ""; try { meAir = localStorage.getItem("sr-air") || ""; } catch (_) {}
+let meData = null, meErr = "", meBusy = false;
+async function loadMe(air) {
+  meAir = String(air).trim(); meData = null; meErr = ""; meBusy = true;
+  try { localStorage.setItem("sr-air", meAir); } catch (_) {}
+  renderMe();
+  try {
+    const r = await fetch(`${API_BASE}/history/${encodeURIComponent(meAir)}`);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `Server returned ${r.status}`);
+    meData = j;
+  } catch (err) { meErr = err.message; }
+  meBusy = false;
+  if (current === "me") renderMe();
+}
+function renderMe() {
+  const d = meData, dists = ["200", "300", "400", "600", "1000", "1200", "Fleche"];
+  const form = `<form id="meForm" class="meform"><input type="text" inputmode="numeric" id="meAir" class="isearch" placeholder="Your AIR number" value="${esc(meAir)}" autocomplete="off" aria-label="AIR number"><button class="btn" type="submit">Show my rides</button></form>`;
+  let body = "";
+  if (meBusy) body = `<p class="note">Looking up rides…</p>`;
+  else if (meErr) body = `<p class="note error">${esc(meErr)}</p>`;
+  else if (d && !d.found) body = `<p class="note">No rides found for AIR ${esc(d.air)} yet. Rides are read from Audax's public ride pages, and the reading is still catching up (${plural(d.coverage?.stillToRead ?? 0, "ride page", "ride pages")} still to read). Check the number, or try again later.</p>`;
+  else if (d) {
+    const tile = (n, l) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`;
+    body = `<h3>${esc(d.name || "Rider")} <span class="chip">AIR ${esc(d.air)}</span></h3>
+      <div class="stats">${tile(d.finished, "Rides finished")}${tile(d.km.toLocaleString("en-IN"), "Km finished")}${tile(d.superRandonneur, "Super Randonneur" + (d.superRandonneur === 1 ? "" : "s"))}${tile(d.medals, "Medals")}</div>
+      <div class="flabel">Finished by distance</div>
+      <div class="stats">${dists.filter(x => d.byDistance[x]).map(x => tile(d.byDistance[x], x === "Fleche" ? "Fleche" : x + " km")).join("") || `<p class="note">No finished rides yet.</p>`}</div>
+      <div class="flabel">Season by season</div>
+      <div class="seasonrows">${d.seasons.map(x => `<div class="srow"><b>${esc(x.year)}</b><span>${["200", "300", "400", "600"].map(k => `<span class="dot ${x.distances.includes(k) ? "on" : ""}">${k}</span>`).join("")}</span>${x.sr ? `<span class="chip">Super Randonneur</span>` : ""}</div>`).join("") || `<p class="note">No finished seasons yet.</p>`}</div>
+      <div class="flabel">All rides (${d.ridden})</div>
+      <div class="ilist">${d.rides.map(r => `<a class="irow" href="#e${esc(r.id)}"><span class="irow-date">${esc(dayLabel(r.date))}<small>${esc(r.date.slice(0, 4))}</small></span><span class="irow-main"><b>${esc(r.distance === "Fleche" ? "Fleche" : r.distance + " km")}</b><small>${esc(r.club)}</small></span><span class="irow-st${r.finished ? "" : " dim"}">${esc(r.finished ? r.result : (r.result || "Registered"))}</span></a>`).join("")}</div>
+      <p class="note">From public Audax ride pages, read since ${esc(d.coverage?.since || "…")}${d.coverage?.stillToRead ? `; ${plural(d.coverage.stillToRead, "page", "pages")} still being read, so older rides may be missing` : ""}. Audax's own records are the official ones.</p>`;
+  }
+  detailEl.innerHTML = `<h2>My rides</h2><p class="note">Enter your AIR number to see your own history: rides done, distances, Super Randonneur years and medals. No password is needed because this comes from public ride results.</p>${form}${body}`;
+}
+detailEl.addEventListener("submit", e => { if (e.target.id !== "meForm") return; e.preventDefault(); const v = document.getElementById("meAir").value.trim(); if (v) loadMe(v); });
+
 // ---------- routing and refresh ----------
 function select() {
   if (location.hash.slice(1).split("?", 1)[0] === "team" && (!club || otherClub())) { const hk = india?.clubs.find(x => x.home); if (hk) { setClub(clubKey(hk)); return; } }   // the hidden team desk belongs to the home club
@@ -1137,11 +1176,11 @@ function select() {
   if (/^e\d+$/.test(h)) current = h.slice(1);
   else if (byDistance) current = byDistance.id;
   else if (h === "team") current = "team";
-  else if (isList(h) || h === "sr" || h === "assistant" || h === "india") current = h;
+  else if (isList(h) || h === "sr" || h === "assistant" || h === "india" || h === "me") current = h;
   else current = "dashboard";
-  if (!club && current !== "team" && !/^e\d+$/.test(h)) current = "india";                    // no club chosen yet: pick one first
+  if (!club && current !== "team" && current !== "me" && !/^e\d+$/.test(h)) current = "india";                    // no club chosen yet: pick one first
   if (current === "dashboard" || isSeason(current)) origin = current;
-  else if (!origin && !["sr", "assistant", "past", "team", "india"].includes(current)) {                      // opened a ride link directly
+  else if (!origin && !["sr", "assistant", "past", "team", "india", "me"].includes(current)) {                      // opened a ride link directly
     const r = rides.find(x => x.id === current);
     origin = r ? (r.date.slice(0, 7) === todayIST().slice(0, 7) ? "dashboard" : "y" + r.date.slice(0, 4)) : "dashboard";
   }
@@ -1151,6 +1190,7 @@ function select() {
   if (current === "team") renderTeam();
   else if (current === "sr") showSR();
   else if (current === "india") renderIndia();
+  else if (current === "me") { renderMe(); if (meAir && !meData && !meBusy && !meErr) loadMe(meAir); }
   else if (current === "assistant") showAssistant();
   else if (isList(current)) renderCurrentList();
   else showEvent(current);

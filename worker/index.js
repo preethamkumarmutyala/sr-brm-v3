@@ -762,6 +762,94 @@ async function handleTrack(request, env, ctx, url) {
   return ok();
 }
 
+// ---------- rider history: public Audax results kept per AIR number ----------
+// Only runs where the HISTORY_SCAN variable is "true" (staging for now). Stores public result lines only: no passwords, nothing private.
+const HISTORY_BATCH = 10;                   // ride pages read per scheduled run (every minute)
+const airNorm = a => String(a || "").trim().toUpperCase().replace(/^0+/, "");
+const isFinished = r => { const x = String(r || "").trim().toUpperCase(); return !!x && !["DNS", "DNF", "LF", "YTC"].includes(x); };
+let histReady = false;
+async function historyDb(env) {
+  const d = await db(env);
+  if (!d) return null;
+  if (!histReady) {
+    const q = s => d.prepare(s);
+    await d.batch([
+      q("CREATE TABLE IF NOT EXISTS hist_events (event_id TEXT PRIMARY KEY, date TEXT NOT NULL, distance TEXT, club TEXT, state TEXT NOT NULL DEFAULT 'todo', tries INTEGER NOT NULL DEFAULT 0, riders INTEGER, scanned INTEGER)"),
+      q("CREATE TABLE IF NOT EXISTS hist_results (air TEXT NOT NULL, event_id TEXT NOT NULL, name TEXT, date TEXT NOT NULL, distance TEXT, club TEXT, result TEXT, medal TEXT, PRIMARY KEY (air, event_id))"),
+      q("CREATE INDEX IF NOT EXISTS idx_hist_air ON hist_results (air, date)"),
+      q("CREATE TABLE IF NOT EXISTS hist_meta (k TEXT PRIMARY KEY, v INTEGER NOT NULL)")
+    ]);
+    histReady = true;
+  }
+  return d;
+}
+async function runHistoryScan(env, ctx) {
+  const d = await historyDb(env);
+  if (!d) return;
+  const now = Date.now(), today = daysAgoISO(0);
+  const seeded = (await d.prepare("SELECT v FROM hist_meta WHERE k='seeded'").first())?.v || 0;
+  if (now - seeded > 6 * 3600e3) {                                   // list every club's rides that already have a page
+    const { data } = await getAllClubs(ctx);
+    const stmts = [];
+    for (const c of data.clubs) for (const r of c.rides) {
+      if (r.id && r.date <= today) stmts.push(d.prepare("INSERT OR IGNORE INTO hist_events (event_id, date, distance, club) VALUES (?, ?, ?, ?)").bind(r.id, r.date, r.distance, `${c.city} · ${c.name}`));
+    }
+    for (let i = 0; i < stmts.length; i += 80) await d.batch(stmts.slice(i, i + 80));
+    await d.prepare("INSERT INTO hist_meta (k, v) VALUES ('seeded', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(now).run();
+  }
+  const recent = daysAgoISO(3);
+  const { results } = await d.prepare(
+    "SELECT event_id, date, distance, club FROM hist_events WHERE state = 'todo' OR (state = 'done' AND date >= ? AND scanned < ?) ORDER BY (state = 'todo') DESC, date DESC LIMIT ?"
+  ).bind(recent, now - 6 * 3600e3, HISTORY_BATCH).all();
+  for (const e of results) {
+    try {
+      const ev = await scrapeEvent(e.event_id);
+      const stmts = [d.prepare("DELETE FROM hist_results WHERE event_id = ?").bind(e.event_id)];
+      for (const r of ev.riders) {
+        const air = airNorm(r.air);
+        if (air) stmts.push(d.prepare("INSERT OR REPLACE INTO hist_results (air, event_id, name, date, distance, club, result, medal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+          .bind(air, e.event_id, r.name, ev.date || e.date, ev.distance || e.distance, r.club || e.club, r.result || "", r.medal || ""));
+      }
+      stmts.push(d.prepare("UPDATE hist_events SET state = 'done', riders = ?, scanned = ? WHERE event_id = ?").bind(ev.riders.length, Date.now(), e.event_id));
+      for (let i = 0; i < stmts.length; i += 80) await d.batch(stmts.slice(i, i + 80));
+    } catch (err) {
+      await d.prepare("UPDATE hist_events SET tries = tries + 1, state = CASE WHEN tries + 1 >= 3 THEN 'skip' ELSE state END, scanned = ? WHERE event_id = ?").bind(Date.now(), e.event_id).run();
+    }
+  }
+}
+async function handleHistory(request, env, air) {
+  const d = await historyDb(env);
+  if (!d) return json(request, { error: "Database not ready" }, 503);
+  if (air === "status") {
+    const s = await d.prepare("SELECT state, count(*) n, min(date) first, max(date) last FROM hist_events GROUP BY state").all();
+    const t = await d.prepare("SELECT count(*) n, count(DISTINCT air) riders FROM hist_results").first();
+    return json(request, { events: s.results, results: t.n, riders: t.riders }, 200, { "Cache-Control": "no-store" });
+  }
+  const key = airNorm(air);
+  if (!/^[A-Z0-9-]{1,12}$/.test(key)) return json(request, { error: "Enter a valid AIR number" }, 400);
+  const { results } = await d.prepare("SELECT event_id, name, date, distance, club, result, medal FROM hist_results WHERE air = ? ORDER BY date DESC").bind(key).all();
+  const cover = await d.prepare("SELECT count(*) done, (SELECT min(date) FROM hist_events WHERE state = 'done') since, (SELECT count(*) FROM hist_events WHERE state = 'todo') todo FROM hist_events WHERE state = 'done'").first();
+  const byDistance = {}, seasons = {};
+  let km = 0, finished = 0, medals = 0;
+  const rides = results.map(r => {
+    const ok = isFinished(r.result), dist = /^fl/i.test(r.distance) ? "Fleche" : r.distance;
+    if (ok) {
+      finished++; byDistance[dist] = (byDistance[dist] || 0) + 1;
+      if (/^\d+$/.test(dist)) km += Number(dist);
+      (seasons[r.date.slice(0, 4)] ||= new Set()).add(dist);
+    }
+    if (r.medal) medals++;
+    return { id: r.event_id, date: r.date, distance: dist, club: r.club, result: r.result, finished: ok };
+  });
+  const seasonList = Object.entries(seasons).sort((a, b) => b[0].localeCompare(a[0])).map(([year, set]) => ({
+    year, distances: [...set], sr: ["200", "300", "400", "600"].every(x => set.has(x)) }));
+  return json(request, {
+    air: key, name: results[0]?.name || "", found: results.length > 0, ridden: results.length, finished, km, medals,
+    superRandonneur: seasonList.filter(s => s.sr).length, byDistance, seasons: seasonList, rides,
+    coverage: { ridesRead: cover.done, since: cover.since, stillToRead: cover.todo }
+  }, 200, { "Cache-Control": "public, max-age=120" });
+}
+
 // ---------- router ----------
 
 export default {
@@ -771,7 +859,7 @@ export default {
     const [a, b, c] = url.pathname.split("/").filter(Boolean);
 
     if (!a) {
-      return json(request, { service: "SR BRM API", environment: env.STAGING_MODE === "true" ? "staging" : "production", club: CLUB, endpoints: ["/calendar", "/all", "/ev/:id", "/rt/:id", "/crossings/:id"] });
+      return json(request, { service: "SR BRM API", environment: env.STAGING_MODE === "true" ? "staging" : "production", club: CLUB, endpoints: ["/calendar", "/all", "/history/:air", "/ev/:id", "/rt/:id", "/crossings/:id"] });
     }
 
     try {
@@ -779,6 +867,7 @@ export default {
       if (a === "team") return await handleTeam(request, env, b, c, ctx);
       if (a === "crossings" && /^\d{3,6}$/.test(b || "")) return await handleCrossings(request, env, b);
       if (request.method !== "GET") return json(request, { error: "Method not allowed" }, 405);
+      if (a === "history" && env.HISTORY_SCAN === "true" && b) return await handleHistory(request, env, b);
       if (a === "calendar") {
         const { data, cache } = await getCalendar(ctx);
         if (env.STAGING_MODE === "true") data.rides = [...data.rides.filter(r => r.id !== TEST_RIDE_ID), virtualTestEvent()];
@@ -814,5 +903,9 @@ export default {
     }
 
     return json(request, { error: "Not found" }, 404);
+  },
+  async scheduled(event, env, ctx) {
+    if (env.HISTORY_SCAN !== "true") return;
+    ctx.waitUntil(runHistoryScan(env, ctx).catch(() => {}));
   }
 };

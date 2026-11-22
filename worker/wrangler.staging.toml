@@ -11,6 +11,10 @@ APP_ORIGIN = "https://staging.sr-brm-v3.pages.dev"
 GMAIL_USER = "preethamkumar@gmail.com"
 BOOTSTRAP_ADMIN_EMAIL = "preethamkumar@gmail.com"
 STAGING_MODE = "true"
+HISTORY_SCAN = "true"          # staging only: read public ride results into the staging database
+
+[triggers]
+crons = ["* * * * *"]
 
 [[d1_databases]]
 binding = "DB"

@@ -340,3 +340,9 @@ a.irow:hover { border-color: var(--brand); }
 .clubrow { display: flex; align-items: center; gap: .4rem; }
 .clubrow .clubopt { flex: 1; min-width: 0; }
 .openclub { flex: none; background: var(--brand); color: #fff; border: 0; border-radius: 999px; padding: .3rem .9rem; font: inherit; font-size: .85rem; font-weight: 600; cursor: pointer; }
+.meform { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0 1rem; }
+.meform .isearch { flex: 1 1 12rem; margin: 0; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 7.5rem), 1fr)); gap: .6rem; margin: .6rem 0; }
+.srow { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; padding: .5rem .8rem; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; margin: .4rem 0; }
+.srow .dot { display: inline-block; min-width: 2.6rem; text-align: center; padding: .15rem .5rem; margin-right: .3rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: .85rem; }
+.srow .dot.on { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
