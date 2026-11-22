@@ -710,7 +710,7 @@ export default {
     const [a, b, c] = url.pathname.split("/").filter(Boolean);
 
     if (!a) {
-      return json(request, { service: "SR BRM API", club: CLUB, endpoints: ["/calendar", "/ev/:id", "/rt/:id", "/crossings/:id"] });
+      return json(request, { service: "SR BRM API", environment: env.STAGING_MODE === "true" ? "staging" : "production", club: CLUB, endpoints: ["/calendar", "/ev/:id", "/rt/:id", "/crossings/:id"] });
     }
 
     try {

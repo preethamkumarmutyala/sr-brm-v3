@@ -5,6 +5,16 @@ const API_BASE = location.hostname.toLowerCase() === "sr-brm-v3.pages.dev"
   ? "https://sr-brm-api.secunderabadrandonneurs.workers.dev"
   : "https://sr-brm-api-staging.secunderabadrandonneurs.workers.dev";
 const AUDAX = "https://www.audaxindia.in";
+const IS_STAGING = API_BASE.includes("-staging");
+// Test copies show an orange strip so nobody mistakes them for the live site. Production never shows it.
+if (IS_STAGING) {
+  const bar = document.createElement("div");
+  bar.textContent = "STAGING \u2013 test site. Test data only; nothing here is live.";
+  bar.style.cssText = "position:sticky;top:0;z-index:9999;background:#222;color:#ffb300;font:700 13px/1.2 system-ui,sans-serif;text-align:center;padding:6px 8px;letter-spacing:.03em";
+  document.body.prepend(bar);
+  document.title = "[STAGING] " + document.title.replace(/^\[STAGING\] /, "");
+}
+
 const LEGACY = { "10047": "600", "10048": "200", "10049": "300", "10050": "400" };   // old backup cue-sheet files: data/<distance>.json
 const SR_DISTANCES = ["200", "300", "400", "600"];
 const WEEK_DAYS = 7;                  // "this week" = rides within 7 days before or after today
