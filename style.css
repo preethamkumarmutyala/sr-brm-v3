@@ -362,3 +362,14 @@ a.irow:hover { border-color: var(--brand); }
 .orgline { display: inline-flex; align-items: center; gap: .45rem; }
 .clubbar > span { display: inline-flex; align-items: center; gap: .5rem; }
 .clubopt .clogo { margin-right: .1rem; }
+.clubbox { max-height: 26rem; padding: .35rem; display: grid; gap: .3rem; align-content: start; }
+.clubopt { padding: .5rem .7rem; gap: .8rem; }
+.clubopt span.clogo { flex: none; }
+.clogo.lg { width: 3rem; height: 3rem; border-radius: 12px; font-size: .95rem; }
+.clubopt .cname { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.clubopt .cname b { font-weight: 600; overflow-wrap: anywhere; }
+.clubopt .cname small { color: var(--muted); font-size: .8rem; }
+.clubopt .ccount { white-space: nowrap; color: var(--muted); font-size: .8rem; }
+.clubrow { border: 1px solid transparent; border-radius: 14px; padding-right: .4rem; }
+.clubrow:hover { border-color: var(--line); background: color-mix(in srgb, var(--brand) 5%, transparent); }
+@media (max-width: 30rem) { .clubopt .ccount { display: none; } }
