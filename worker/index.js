@@ -151,6 +151,36 @@ function parseCalendar(html, year, club) {
   }
   return rides;
 }
+// Reads EVERY club's row of an Audax calendar page (used by the all-clubs view; parseCalendar above is untouched).
+// Each table row is: club | JAN ... DEC | summary. We learn where the club-name cell sits from our own club's row.
+function parseAllClubs(html, year) {
+  const rows = html.split(/<tr[\s>]/i).slice(1).map(r => r.split(/<t[dh][\s>]/i).slice(1));
+  const own = rows.map(cells => cells.findIndex(c => clean(c).toLowerCase().includes(CLUB.toLowerCase()))).find(i => i >= 0);
+  const nameAt = own === undefined ? 0 : own;
+  const pad = n => String(n).padStart(2, "0");
+  const clubs = [];
+  for (const cells of rows) {
+    if (cells.length < nameAt + 13) continue;
+    const name = clean(cells[nameAt]);
+    if (!name || /^(jan|club|month)/i.test(name) || name.length > 80) continue;
+    const rides = [];
+    for (let month = 1; month <= 12; month++) {
+      const found = [];
+      const rest = cells[nameAt + month].replace(/<a\b[^>]*href=["'][^"']*event-e-(\d+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi, (_, id, inner) => {
+        const t = clean(inner).match(/(\d{1,2})\s*-\s*(\d{2,4}|Fl[e\u00e8]che)\b/i);
+        if (t) found.push({ id, day: Number(t[1]), dist: t[2] });
+        return " ";
+      });
+      for (const t of clean(rest).matchAll(/(\d{1,2})\s*-\s*(\d{2,4}|Fl[e\u00e8]che)\b/gi)) found.push({ id: null, day: Number(t[1]), dist: t[2] });
+      for (const f of found) {
+        if (f.day < 1 || f.day > 31) continue;
+        rides.push({ year, month, day: f.day, date: `${year}-${pad(month)}-${pad(f.day)}`, distance: /^fl/i.test(f.dist) ? "Fleche" : f.dist, id: f.id });
+      }
+    }
+    clubs.push({ name, rides });
+  }
+  return clubs;
+}
 // Finds the address of another year's calendar from the "Previous Years" / next-year links on the calendar home page
 function findYearLink(html, year) {
   const m = html.match(new RegExp(`<a\\b[^>]*href=["']([^"']+)["'][^>]*>\\s*${year}\\s*<\\/a>`, "i"));
@@ -287,6 +317,33 @@ async function scrapeCalendar() {
   return { club: CLUB, years: [homeYear - YEARS_BACK, homeYear + YEARS_AHEAD], rides, errors, fetchedAt: new Date().toISOString() };
 }
 
+// All clubs, this year and next year. Kept separate from scrapeCalendar so the existing /calendar cannot be affected.
+async function scrapeAllClubs() {
+  const errors = [];
+  let home = "";
+  try { home = await fetchText(CALENDAR_HOME); } catch (err) { errors.push(`current year: ${err.message}`); }
+  const homeYear = Number((home.match(/Calendar for (\d{4})/i) || [])[1]) || new Date().getUTCFullYear();
+  const pages = [];
+  if (home) pages.push([homeYear, home]);
+  for (const y of [homeYear + 1]) {
+    const link = findYearLink(home, y);
+    try { pages.push([y, await fetchText(link ? new URL(link, `${SOURCE}/`).href : `${SOURCE}/events-ec-${y}`)]); } catch (err) { errors.push(`${y}: ${err.message}`); }
+  }
+  const byName = new Map();
+  for (const [year, html] of pages) {
+    for (const c of parseAllClubs(html, year)) {
+      if (!byName.has(c.name)) byName.set(c.name, []);
+      byName.get(c.name).push(...c.rides);
+    }
+  }
+  const clubs = [...byName].map(([name, rides]) => ({
+    name, home: name.toLowerCase().includes(CLUB.toLowerCase()),
+    rides: rides.sort((a, b) => a.date.localeCompare(b.date) || a.distance.localeCompare(b.distance))
+  })).sort((a, b) => a.name.localeCompare(b.name));
+  if (!clubs.length) errors.push("no clubs found on the Audax calendar");
+  return { years: [homeYear, homeYear + 1], clubCount: clubs.length, clubs, errors, fetchedAt: new Date().toISOString() };
+}
+
 // Returns cached data when fresh, otherwise produces it and caches it.
 async function cached(key, ttl, ctx, produce) {
   const cache = caches.default;
@@ -303,6 +360,7 @@ async function cached(key, ttl, ctx, produce) {
 }
 const getEvent = (id, ctx) => cached(`ev2/${id}`, d => (d.date && d.date < daysAgoISO(2) ? 21600 : CACHE_TTL), ctx, () => scrapeEvent(id));
 const getRoute = (id, ctx) => cached(`route-v4/${id}`, ROUTE_TTL, ctx, () => scrapeRoute(id, ctx));
+const getAllClubs = ctx => cached("allclubs-v1", d => (d.errors.length ? 120 : CALENDAR_TTL), ctx, () => scrapeAllClubs());
 const getCalendar = ctx => cached("calendar-v1", d => (d.errors.length ? 120 : CALENDAR_TTL), ctx, () => scrapeCalendar());
 
 // ---------- team area, control times and tracking ----------
@@ -710,7 +768,7 @@ export default {
     const [a, b, c] = url.pathname.split("/").filter(Boolean);
 
     if (!a) {
-      return json(request, { service: "SR BRM API", environment: env.STAGING_MODE === "true" ? "staging" : "production", club: CLUB, endpoints: ["/calendar", "/ev/:id", "/rt/:id", "/crossings/:id"] });
+      return json(request, { service: "SR BRM API", environment: env.STAGING_MODE === "true" ? "staging" : "production", club: CLUB, endpoints: ["/calendar", "/all", "/ev/:id", "/rt/:id", "/crossings/:id"] });
     }
 
     try {
@@ -721,6 +779,11 @@ export default {
       if (a === "calendar") {
         const { data, cache } = await getCalendar(ctx);
         if (env.STAGING_MODE === "true") data.rides = [...data.rides.filter(r => r.id !== TEST_RIDE_ID), virtualTestEvent()];
+        return json(request, data, 200, { "Cache-Control": "public, max-age=300", "X-Cache": cache });
+      }
+
+      if (a === "all") {
+        const { data, cache } = await getAllClubs(ctx);
         return json(request, data, 200, { "Cache-Control": "public, max-age=300", "X-Cache": cache });
       }
 
