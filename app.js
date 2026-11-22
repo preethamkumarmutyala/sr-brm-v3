@@ -253,7 +253,7 @@ const isSeason = v => /^y\d{4}$/.test(v || "");
 const isList = v => v === "dashboard" || v === "past" || isSeason(v);
 const thisYear = () => Number(todayIST().slice(0, 4));
 const navKey = v => (isSeason(v) && Number(v.slice(1)) < thisYear() ? "past" : v);     // old seasons all light up "Past seasons"
-const lit = () => (current === "team" ? "" : navKey(isList(current) || current === "sr" || current === "assistant" ? current : origin));
+const lit = () => (current === "team" ? "" : navKey(isList(current) || current === "sr" || current === "india" || current === "assistant" ? current : origin));
 const ICONS = {
   now: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   cur: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/>',
@@ -273,7 +273,7 @@ function renderTiles() {
     main("y" + cy, "cur", "Current season", `${plural(n(cy), "ride", "rides")} in ${cy}`) +
     main("y" + (cy + 1), "next", "Next season", `${plural(n(cy + 1), "ride", "rides")} in ${cy + 1}`) +
     (past.length ? main("past", "past", "Past seasons", past.length > 1 ? `${past[0]} to ${past[past.length - 1]}` : `${past[0]}`) : "") +
-    `</div><div class="subnav">${srIds() ? tool("sr", "One Week SR") : ""}${tool("assistant", "BRM Assistant")}</div>`;
+    `</div><div class="subnav">${srIds() ? tool("sr", "One Week SR") : ""}${tool("india", "All India rides")}${tool("assistant", "BRM Assistant")}</div>`;
 }
 tilesEl.addEventListener("click", e => { const b = e.target.closest("[data-d]"); if (b) location.hash = b.dataset.d; });
 
@@ -997,6 +997,86 @@ detailEl.addEventListener("keydown", e => {                              // Ente
   if (next) next.focus();
 });
 
+// ---------- All India: rides from every Audax club ----------
+// Read-only list from the Worker's /all. Other clubs' rides open on Audax; only our own club has full pages here.
+let india = null, indiaErr = "";
+let ind = { picked: [], dist: "all", month: "all", when: "up", q: "" };
+try { ind.picked = JSON.parse(localStorage.getItem("sr-clubs") || "[]").filter(x => typeof x === "string"); } catch (_) {}
+const saveClubs = () => { try { localStorage.setItem("sr-clubs", JSON.stringify(ind.picked)); } catch (_) {} };
+const clubKey = c => `${c.city}|${c.name}`;
+const indiaDist = r => (r.distance === "Fleche" ? "Fleche" : Number(r.distance) >= 1000 ? "1000+" : r.distance);
+const dayLabel = iso => new Date(iso + "T00:00:00Z").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+async function renderIndia() {
+  if (!india && !indiaErr) {
+    detailEl.innerHTML = `<h2>All India rides</h2><p class="note">Loading rides from every club…</p>`;
+    try {
+      const r = await fetch(`${API_BASE}/all`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      india = await r.json();
+    } catch (err) { indiaErr = "Could not load the all-club list right now. Please try again in a few minutes."; }
+    if (current !== "india") return;
+  }
+  if (indiaErr) { detailEl.innerHTML = `<h2>All India rides</h2><p class="note error">${esc(indiaErr)} <button type="button" class="linkbtn" data-ind-retry>Try again</button></p>`; return; }
+  const today = todayIST(), clubs = india.clubs;
+  const search = ind.q.trim().toLowerCase();
+  const shown = clubs.filter(c => !search || `${c.city} ${c.name}`.toLowerCase().includes(search));
+  const sel = new Set(ind.picked);
+  let list = [];
+  for (const c of clubs) if (!sel.size || sel.has(clubKey(c))) for (const r of c.rides) list.push({ ...r, club: c });
+  list = list.filter(r => (ind.when === "all" || (ind.when === "up" ? r.date >= today : r.date < today)) &&
+    (ind.dist === "all" || indiaDist(r) === ind.dist) && (ind.month === "all" || r.date.slice(5, 7) === ind.month));
+  list.sort((a, b) => (ind.when === "past" ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)) || a.club.city.localeCompare(b.club.city));
+  const total = list.length, cap = 150;
+  const dists = ["100", "150", "200", "300", "400", "600", "1000+", "Fleche"];
+  const row = r => {
+    const mine = r.club.home, href = r.id ? (mine ? `#e${r.id}` : `${AUDAX}/event-e-${r.id}`) : "";
+    const status = r.id ? (r.date < today ? "Completed" : "Registration page") : (r.date < today ? "No Audax page" : "Registration not opened");
+    const inner = `<span class="irow-date">${esc(dayLabel(r.date))}<small>${esc(r.year)}</small></span>
+      <span class="irow-main"><b>${esc(r.distance === "Fleche" ? "Fleche" : r.distance + " km")}</b> · ${esc(r.club.city)}<small>${esc(r.club.name)}${mine ? " · our club" : ""}</small></span>
+      <span class="irow-st${r.id ? "" : " dim"}">${esc(status)}</span>`;
+    return href ? `<a class="irow" href="${href}"${mine ? "" : ` target="_blank" rel="noopener"`}>${inner}</a>` : `<div class="irow">${inner}</div>`;
+  };
+  detailEl.innerHTML = `<h2>All India rides</h2>
+    <p class="note">Rides from every Audax club, taken from the official calendar. Pick clubs to follow, or leave it empty to see everyone. Other clubs' rides open on the Audax website, where registration is done.</p>
+    <div class="flabel">Clubs ${sel.size ? `(${sel.size} picked)` : ""}</div>
+    ${sel.size ? `<div class="picked">${clubs.filter(c => sel.has(clubKey(c))).map(c => `<button type="button" class="pickchip" data-ind-club="${esc(clubKey(c))}">${esc(c.city)} · ${esc(c.name)} ✕</button>`).join("")} <button type="button" class="linkbtn" data-ind-clear>Clear clubs</button></div>` : ""}
+    <input type="search" id="indSearch" class="isearch" placeholder="Search a city or club" value="${esc(ind.q)}" autocomplete="off" aria-label="Search clubs">
+    <div class="clubbox">${shown.map(c => `<label class="clubopt"><input type="checkbox" data-ind-club="${esc(clubKey(c))}" ${sel.has(clubKey(c)) ? "checked" : ""}><span><b>${esc(c.city)}</b> ${esc(c.name)}</span><small>${c.rides.length}</small></label>`).join("") || `<p class="note">No club matches.</p>`}</div>
+    <div class="flabel">When</div>
+    <div class="dchips">${[["up", "Upcoming"], ["past", "Earlier"], ["all", "All"]].map(([k, t]) => `<button type="button" class="dchip" data-ind-when="${k}" aria-pressed="${ind.when === k}">${t}</button>`).join("")}</div>
+    <div class="flabel">Distance</div>
+    <div class="dchips">${dists.map(d => `<button type="button" class="dchip" data-ind-dist="${d}" aria-pressed="${ind.dist === d}">${d === "Fleche" ? "Fleche" : d + " km"}</button>`).join("")}</div>
+    <div class="flabel">Month</div>
+    <div class="months">${MON.map((m, i) => { const mm = String(i + 1).padStart(2, "0"); return `<button type="button" class="mchip" data-ind-month="${mm}" aria-pressed="${ind.month === mm}">${m}</button>`; }).join("")}</div>
+    <p class="note"><b>${plural(total, "ride", "rides")}</b>${total > cap ? ` (showing the first ${cap}; pick a club, distance or month to narrow it)` : ""}</p>
+    <div class="ilist">${list.slice(0, cap).map(row).join("") || `<p class="note">No rides match these choices.</p>`}</div>
+    <p class="note">Updated ${esc(new Date(india.fetchedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }))}. Source: audaxindia.in calendar.</p>`;
+}
+detailEl.addEventListener("click", e => {
+  if (current !== "india") return;
+  const t = e.target.closest("[data-ind-club],[data-ind-clear],[data-ind-when],[data-ind-dist],[data-ind-month],[data-ind-retry]");
+  if (!t || t.matches("input")) return;
+  const flip = (k, v) => { ind[k] = ind[k] === v ? "all" : v; };
+  if (t.dataset.indClub) ind.picked = ind.picked.filter(x => x !== t.dataset.indClub);
+  else if (t.hasAttribute("data-ind-clear")) ind.picked = [];
+  else if (t.dataset.indWhen) ind.when = t.dataset.indWhen;
+  else if (t.dataset.indDist) flip("dist", t.dataset.indDist);
+  else if (t.dataset.indMonth) flip("month", t.dataset.indMonth);
+  else if (t.hasAttribute("data-ind-retry")) { indiaErr = ""; }
+  saveClubs(); renderIndia();
+});
+detailEl.addEventListener("change", e => {
+  if (current !== "india" || !e.target.matches("input[data-ind-club]")) return;
+  const k = e.target.dataset.indClub;
+  ind.picked = e.target.checked ? [...new Set([...ind.picked, k])] : ind.picked.filter(x => x !== k);
+  saveClubs(); renderIndia();
+});
+detailEl.addEventListener("input", e => {
+  if (current !== "india" || e.target.id !== "indSearch") return;
+  ind.q = e.target.value; const pos = e.target.selectionStart;
+  renderIndia().then?.(() => { const i = document.getElementById("indSearch"); if (i) { i.focus(); i.setSelectionRange(pos, pos); } });
+});
+
 // ---------- routing and refresh ----------
 function select() {
   const [h] = location.hash.slice(1).split("?", 1), wk = weekRides();
@@ -1004,10 +1084,10 @@ function select() {
   if (/^e\d+$/.test(h)) current = h.slice(1);
   else if (byDistance) current = byDistance.id;
   else if (h === "team") current = "team";
-  else if (isList(h) || h === "sr" || h === "assistant") current = h;
+  else if (isList(h) || h === "sr" || h === "assistant" || h === "india") current = h;
   else current = "dashboard";
   if (current === "dashboard" || isSeason(current)) origin = current;
-  else if (!origin && !["sr", "assistant", "past", "team"].includes(current)) {                      // opened a ride link directly
+  else if (!origin && !["sr", "assistant", "past", "team", "india"].includes(current)) {                      // opened a ride link directly
     const r = rides.find(x => x.id === current);
     origin = r ? (r.date.slice(0, 7) === todayIST().slice(0, 7) ? "dashboard" : "y" + r.date.slice(0, 4)) : "dashboard";
   }
@@ -1016,6 +1096,7 @@ function select() {
   window.scrollTo?.(0, 0);
   if (current === "team") renderTeam();
   else if (current === "sr") showSR();
+  else if (current === "india") renderIndia();
   else if (current === "assistant") showAssistant();
   else if (isList(current)) renderCurrentList();
   else showEvent(current);
