@@ -346,3 +346,6 @@ a.irow:hover { border-color: var(--brand); }
 .srow { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; padding: .5rem .8rem; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; margin: .4rem 0; }
 .srow .dot { display: inline-block; min-width: 2.6rem; text-align: center; padding: .15rem .5rem; margin-right: .3rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: .85rem; }
 .srow .dot.on { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
+.homelink { display: flex; align-items: center; gap: .6rem 1.1rem; flex: 1 1 14rem; min-width: 0; color: inherit; text-decoration: none; }
+.homelink:hover { text-decoration: none; }
+.links a.homebtn { display: inline-flex; align-items: center; gap: .35rem; }
