@@ -273,7 +273,7 @@ function renderTiles() {
     main("y" + cy, "cur", "Current season", `${plural(n(cy), "ride", "rides")} in ${cy}`) +
     main("y" + (cy + 1), "next", "Next season", `${plural(n(cy + 1), "ride", "rides")} in ${cy + 1}`) +
     (past.length ? main("past", "past", "Past seasons", past.length > 1 ? `${past[0]} to ${past[past.length - 1]}` : `${past[0]}`) : "") +
-    `</div><div class="subnav">${srIds() ? tool("sr", "One Week SR") : ""}${tool("india", "All India rides")}${tool("assistant", "BRM Assistant")}</div>`;
+    `</div><div class="subnav">${srIds() ? tool("sr", "One Week SR") : ""}${tool("assistant", "BRM Assistant")}</div>`;
 }
 tilesEl.addEventListener("click", e => { const b = e.target.closest("[data-d]"); if (b) location.hash = b.dataset.d; });
 
@@ -1036,8 +1036,8 @@ async function renderIndia() {
       <span class="irow-st${r.id ? "" : " dim"}">${esc(status)}</span>`;
     return href ? `<a class="irow" href="${href}"${mine ? "" : ` target="_blank" rel="noopener"`}>${inner}</a>` : `<div class="irow">${inner}</div>`;
   };
-  detailEl.innerHTML = `<h2>All India rides</h2>
-    <p class="note">Rides from every Audax club, taken from the official calendar. Pick clubs to follow, or leave it empty to see everyone. Other clubs' rides open on the Audax website, where registration is done.</p>
+  detailEl.innerHTML = `<h2>Clubs &amp; rides across India</h2>
+    <p class="note">Search a club, tick the ones you want to follow, or leave it empty to see everyone. Other clubs' rides open on the Audax website, where registration is done.</p>
     <div class="flabel">Clubs ${sel.size ? `(${sel.size} picked)` : ""}</div>
     ${sel.size ? `<div class="picked">${clubs.filter(c => sel.has(clubKey(c))).map(c => `<button type="button" class="pickchip" data-ind-club="${esc(clubKey(c))}">${esc(c.city)} · ${esc(c.name)} ✕</button>`).join("")} <button type="button" class="linkbtn" data-ind-clear>Clear clubs</button></div>` : ""}
     <input type="search" id="indSearch" class="isearch" placeholder="Search a city or club" value="${esc(ind.q)}" autocomplete="off" aria-label="Search clubs">
