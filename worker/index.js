@@ -811,6 +811,29 @@ async function historyDb(env) {
   }
   return d;
 }
+// Older seasons: one earlier calendar year per run (newest first) is read from Audax and its rides are queued for the ride-page scan
+const HISTORY_MIN_YEAR = 2010;
+async function backfillYear(d) {
+  const meta = async k => (await d.prepare("SELECT v FROM hist_meta WHERE k=?").bind(k).first())?.v;
+  const put = (k, v) => d.prepare("INSERT INTO hist_meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(k, v).run();
+  let y = await meta("backfill_next");
+  if (y === undefined || y === null) y = new Date().getUTCFullYear() - 2;       // the current, previous and next seasons are seeded already
+  y = Number(y);
+  if (y < HISTORY_MIN_YEAR) return;
+  let found = 0;
+  try {
+    const html = await fetchText(`${SOURCE}/events-ec-${y}`), today = daysAgoISO(0), stmts = [];
+    for (const c of parseAllClubs(html, y)) for (const r of c.rides)
+      if (r.id && r.date <= today) stmts.push(d.prepare("INSERT OR IGNORE INTO hist_events (event_id, date, distance, club) VALUES (?, ?, ?, ?)").bind(r.id, r.date, r.distance, `${c.city} · ${c.name}`));
+    found = stmts.length;
+    for (let i = 0; i < stmts.length; i += 80) await d.batch(stmts.slice(i, i + 80));
+  } catch (err) {
+    const tries = Number(await meta("backfill_tries") || 0) + 1;
+    if (tries < 3) { await put("backfill_tries", tries); return; }              // try this year again next minute
+    found = -1;                                                                // give up on this year
+  }
+  await put(`backfill_${y}`, found); await put("backfill_tries", 0); await put("backfill_next", y - 1);
+}
 async function runHistoryScan(env, ctx) {
   const d = await historyDb(env);
   if (!d) return;
@@ -825,6 +848,7 @@ async function runHistoryScan(env, ctx) {
     for (let i = 0; i < stmts.length; i += 80) await d.batch(stmts.slice(i, i + 80));
     await d.prepare("INSERT INTO hist_meta (k, v) VALUES ('seeded', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(now).run();
   }
+  await backfillYear(d);
   const recent = daysAgoISO(3);
   const { results } = await d.prepare(
     "SELECT event_id, date, distance, club FROM hist_events WHERE state = 'todo' OR (state = 'done' AND date >= ? AND scanned < ?) ORDER BY (state = 'todo') DESC, date DESC LIMIT ?"
@@ -851,7 +875,9 @@ async function handleHistory(request, env, air) {
   if (air === "status") {
     const s = await d.prepare("SELECT state, count(*) n, min(date) first, max(date) last FROM hist_events GROUP BY state").all();
     const t = await d.prepare("SELECT count(*) n, count(DISTINCT air) riders FROM hist_results").first();
-    return json(request, { events: s.results, results: t.n, riders: t.riders }, 200, { "Cache-Control": "no-store" });
+    const bf = (await d.prepare("SELECT k, v FROM hist_meta WHERE k LIKE 'backfill_%' AND k NOT IN ('backfill_next','backfill_tries') ORDER BY k DESC").all()).results;
+    const next = (await d.prepare("SELECT v FROM hist_meta WHERE k='backfill_next'").first())?.v;
+    return json(request, { events: s.results, results: t.n, riders: t.riders, olderSeasons: { nextYear: next ?? null, done: next !== undefined && next < HISTORY_MIN_YEAR, ridesFoundByYear: Object.fromEntries(bf.map(x => [x.k.slice(9), x.v])) } }, 200, { "Cache-Control": "no-store" });
   }
   if (air === "search") {                                           // type part of a name or AIR number, get a short list of riders
     const q = (new URL(request.url).searchParams.get("q") || "").trim().replace(/[%_\\]/g, "").slice(0, 40);
