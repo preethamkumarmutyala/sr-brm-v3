@@ -161,7 +161,9 @@ function parseAllClubs(html, year) {
   const clubs = [];
   for (const cells of rows) {
     if (cells.length < nameAt + 13) continue;
-    const name = clean(cells[nameAt]);
+    const nameCell = cells[nameAt];
+    const city = clean((nameCell.match(/<strong>([\s\S]*?)<\/strong>/i) || [])[1] || "");
+    const name = clean(nameCell.replace(/<strong>[\s\S]*?<\/strong>/i, " "));      // club name; the city is the bold part
     if (!name || /^(jan|club|month)/i.test(name) || name.length > 80) continue;
     const rides = [];
     for (let month = 1; month <= 12; month++) {
@@ -177,7 +179,7 @@ function parseAllClubs(html, year) {
         rides.push({ year, month, day: f.day, date: `${year}-${pad(month)}-${pad(f.day)}`, distance: /^fl/i.test(f.dist) ? "Fleche" : f.dist, id: f.id });
       }
     }
-    clubs.push({ name, rides });
+    clubs.push({ name, city, rides });
   }
   return clubs;
 }
@@ -332,14 +334,15 @@ async function scrapeAllClubs() {
   const byName = new Map();
   for (const [year, html] of pages) {
     for (const c of parseAllClubs(html, year)) {
-      if (!byName.has(c.name)) byName.set(c.name, []);
-      byName.get(c.name).push(...c.rides);
+      const key = `${c.city}|${c.name}`;
+      if (!byName.has(key)) byName.set(key, { name: c.name, city: c.city, rides: [] });
+      byName.get(key).rides.push(...c.rides);
     }
   }
-  const clubs = [...byName].map(([name, rides]) => ({
-    name, home: name.toLowerCase().includes(CLUB.toLowerCase()),
+  const clubs = [...byName.values()].map(({ name, city, rides }) => ({
+    name, city, home: name.toLowerCase().includes(CLUB.toLowerCase()),
     rides: rides.sort((a, b) => a.date.localeCompare(b.date) || a.distance.localeCompare(b.distance))
-  })).sort((a, b) => a.name.localeCompare(b.name));
+  })).sort((a, b) => a.city.localeCompare(b.city) || a.name.localeCompare(b.name));
   if (!clubs.length) errors.push("no clubs found on the Audax calendar");
   return { years: [homeYear, homeYear + 1], clubCount: clubs.length, clubs, errors, fetchedAt: new Date().toISOString() };
 }
