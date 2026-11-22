@@ -373,3 +373,6 @@ a.irow:hover { border-color: var(--brand); }
 .clubrow { border: 1px solid transparent; border-radius: 14px; padding-right: .4rem; }
 .clubrow:hover { border-color: var(--line); background: color-mix(in srgb, var(--brand) 5%, transparent); }
 @media (max-width: 30rem) { .clubopt .ccount { display: none; } }
+
+.dchip .cnt{display:inline-block;margin-left:7px;padding:1px 7px;border-radius:999px;background:rgba(255,255,255,.12);font-size:.8em;font-weight:700}
+.dchip[aria-pressed="true"] .cnt{background:rgba(255,255,255,.28)}

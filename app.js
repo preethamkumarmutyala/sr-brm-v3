@@ -601,7 +601,7 @@ function renderSeason(year) {
     <div class="fchips">${GROUPS.map(chipSt).join("")}</div>
     <div class="flabel">Month</div><div class="months">${months}</div>
     ${dists.length > 1 ? `<div class="flabel">Distance</div><div class="dchips">${dists.map(d =>
-      `<button type="button" class="dchip" data-dist="${d}" aria-pressed="${flt.dist === d}">${distChip(d)}</button>`).join("")}</div>` : ""}
+      `<button type="button" class="dchip" data-dist="${d}" aria-pressed="${flt.dist === d}">${distChip(d)}<span class="cnt">${all.filter(r => distOf(r) === d).length}</span></button>`).join("")}</div>` : ""}
     ${active ? `<p class="note">Showing ${plural(list.length, "ride", "rides")} of ${all.length}. <button type="button" class="linkbtn" data-clear>Show all rides</button></p>` : ""}
     ${list.length ? monthGroups(list) : `<p class="note">No rides match these choices. <button type="button" class="linkbtn" data-clear>Show all rides</button></p>`}`;
   loadDetails(list.filter(r => r.id).map(r => r.id));
@@ -1108,8 +1108,10 @@ async function renderIndia() {
   const sel = new Set(ind.picked);
   let list = [];
   for (const c of clubs) if (!sel.size || sel.has(clubKey(c))) for (const r of c.rides) list.push({ ...r, club: c });
-  list = list.filter(r => (ind.when === "all" || (ind.when === "up" ? r.date >= today : r.date < today)) &&
-    (ind.dist === "all" || indiaDist(r) === ind.dist) && (ind.month === "all" || r.date.slice(5, 7) === ind.month));
+  const scoped = list.filter(r => (ind.when === "all" || (ind.when === "up" ? r.date >= today : r.date < today)) &&
+    (ind.month === "all" || r.date.slice(5, 7) === ind.month));
+  const distCount = {}; for (const r of scoped) { const k = indiaDist(r); distCount[k] = (distCount[k] || 0) + 1; }
+  list = scoped.filter(r => ind.dist === "all" || indiaDist(r) === ind.dist);
   list.sort((a, b) => (ind.when === "past" ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)) || a.club.city.localeCompare(b.club.city));
   const total = list.length, cap = 150;
   const dists = ["100", "150", "200", "300", "400", "600", "1000", "1200+", "Fleche"];
@@ -1130,7 +1132,8 @@ async function renderIndia() {
     <div class="flabel">When</div>
     <div class="dchips">${[["up", "Upcoming"], ["past", "Earlier"], ["all", "All"]].map(([k, t]) => `<button type="button" class="dchip" data-ind-when="${k}" aria-pressed="${ind.when === k}">${t}</button>`).join("")}</div>
     <div class="flabel">Distance</div>
-    <div class="dchips">${dists.map(d => `<button type="button" class="dchip" data-ind-dist="${d}" aria-pressed="${ind.dist === d}">${distChip(d)}</button>`).join("")}</div>
+    <div class="dchips">${dists.map(d => `<button type="button" class="dchip" data-ind-dist="${d}" aria-pressed="${ind.dist === d}">${distChip(d)}<span class="cnt">${distCount[d] || 0}</span></button>`).join("")}</div>
+    <p class="note">${sel.size ? "Counts are for the clubs you picked" : "Counts are across all clubs"}, ${ind.when === "up" ? "upcoming rides" : ind.when === "past" ? "earlier rides" : "all rides"}${ind.month === "all" ? "" : " in " + MON[Number(ind.month) - 1]}.</p>
     <div class="flabel">Month</div>
     <div class="months">${MON.map((m, i) => { const mm = String(i + 1).padStart(2, "0"); return `<button type="button" class="mchip" data-ind-month="${mm}" aria-pressed="${ind.month === mm}">${m}</button>`; }).join("")}</div>
     <p class="note"><b>${plural(total, "ride", "rides")}</b>${total > cap ? ` (showing the first ${cap}; pick a club, distance or month to narrow it)` : ""}</p>
