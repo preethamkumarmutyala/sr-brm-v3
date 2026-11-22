@@ -726,7 +726,9 @@ const trackMsg = (code, name) => `Hello${name ? " " + name.split(" ")[0] : ""}! 
 4) Switch tracking ON before the start. The server begins saving positions after the team records your start at CP1; it stops after the final control or if the team marks DNS/DNF.
 Only the organising team can see your exact location. Approximate GPS km is shown on the public ride page. ${API_BASE.includes("-staging") ? "Staging test data goes to the isolated staging database." : "Location records are kept for up to 30 days."}`;
 
-function storeTeam(j) { localStorage.setItem(TEAM_KEY, JSON.stringify({ email: j.email, role: j.role, token: j.token, exp: Date.now() + 11.5 * 3600e3 })); }
+// The Team desk link in the top bar is only shown while a team member is signed in
+const syncTeamLink = () => { const a = document.querySelector(".teamlink"); if (a) a.hidden = !getTeam(); };
+function storeTeam(j) { localStorage.setItem(TEAM_KEY, JSON.stringify({ email: j.email, role: j.role, token: j.token, exp: Date.now() + 11.5 * 3600e3 })); syncTeamLink(); }
 function renderLogin(msg = "") {
   const params = new URLSearchParams(location.hash.split("?").slice(1).join("?")), invite = params.get("invite"), reset = params.get("reset"), setupToken = invite || reset;
   if (setupToken) {
@@ -1023,7 +1025,7 @@ detailEl.addEventListener("click", async e => {
   if (!t) return;
   const act = t.dataset.team, air = t.dataset.air;
   try {
-    if (act === "signout") { try { await api("/team/logout", {}); } catch (_) {} localStorage.removeItem(TEAM_KEY); renderTeam(); }
+    if (act === "signout") { try { await api("/team/logout", {}); } catch (_) {} localStorage.removeItem(TEAM_KEY); syncTeamLink(); renderTeam(); }
     else if (act === "tab") { desk.tab = t.dataset.tab; renderTeam(); }
     else if (act === "password") renderPasswordForm();
     else if (act === "cancelpassword") renderTeam();
@@ -1250,6 +1252,7 @@ document.addEventListener("click", e => {
 
 // ---------- routing and refresh ----------
 function select() {
+  syncTeamLink();
   const [h] = location.hash.slice(1).split("?", 1), wk = weekRides();
   const byDistance = /^(200|300|400|600)$/.test(h) ? wk.find(r => r.distance === h) : null;   // old links like #600
   if (/^e\d+$/.test(h)) current = h.slice(1);

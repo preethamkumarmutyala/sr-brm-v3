@@ -383,3 +383,5 @@ a.irow:hover { border-color: var(--brand); }
 .clubgo .chev { flex: none; color: var(--muted); font-size: 1.4rem; line-height: 1; }
 .clubgo:hover .cname b { text-decoration: underline; }
 .clubgo:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.teamlink[hidden]{display:none}
