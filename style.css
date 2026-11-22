@@ -376,3 +376,10 @@ a.irow:hover { border-color: var(--brand); }
 
 .dchip .cnt{display:inline-block;margin-left:7px;padding:1px 7px;border-radius:999px;background:rgba(255,255,255,.12);font-size:.8em;font-weight:700}
 .dchip[aria-pressed="true"] .cnt{background:rgba(255,255,255,.28)}
+
+.clubpick { flex: none; display: flex; align-items: center; padding: .5rem .3rem .5rem .6rem; cursor: pointer; }
+.clubpick input { width: 1.1rem; height: 1.1rem; }
+.clubgo { background: none; border: 0; color: inherit; font: inherit; text-align: left; width: auto; cursor: pointer; }
+.clubgo .chev { flex: none; color: var(--muted); font-size: 1.4rem; line-height: 1; }
+.clubgo:hover .cname b { text-decoration: underline; }
+.clubgo:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }

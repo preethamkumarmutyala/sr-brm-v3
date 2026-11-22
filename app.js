@@ -1124,11 +1124,11 @@ async function renderIndia() {
     return href ? `<a class="irow" href="${href}" data-open-club="${esc(clubKey(r.club))}">${inner}</a>` : `<div class="irow">${inner}</div>`;
   };
   detailEl.innerHTML = `<h2>Clubs &amp; rides across India</h2>
-    <p class="note">Search a club, tick the ones you want to follow, or leave it empty to see everyone. Tap <b>Open</b> on a club to see its Now page, seasons, registration and riders. Registration itself is always done on Audax.</p>
+    <p class="note">Search a club, tick the box to follow clubs, or leave it empty to see everyone. Tap a club name to see its Now page, seasons, registration and riders. Registration itself is always done on Audax.</p>
     <div class="flabel">Clubs ${sel.size ? `(${sel.size} picked)` : ""}</div>
     ${sel.size ? `<div class="picked">${clubs.filter(c => sel.has(clubKey(c))).map(c => `<button type="button" class="pickchip" data-ind-club="${esc(clubKey(c))}">${esc(c.city)} · ${esc(c.name)} ✕</button>`).join("")} <button type="button" class="linkbtn" data-ind-clear>Clear clubs</button></div>` : ""}
     <input type="search" id="indSearch" class="isearch" placeholder="Search a city or club" value="${esc(ind.q)}" autocomplete="off" aria-label="Search clubs">
-    <div class="clubbox">${shown.map(c => `<div class="clubrow"><label class="clubopt"><input type="checkbox" data-ind-club="${esc(clubKey(c))}" ${sel.has(clubKey(c)) ? "checked" : ""}>${logoHtml(c.name, "lg")}<span class="cname"><b>${esc(c.name)}</b><small>${esc(c.city)}</small></span><small class="ccount">${plural(c.rides.length, "ride", "rides")}</small></label><button type="button" class="openclub" data-ind-open="${esc(clubKey(c))}">Open</button></div>`).join("") || `<p class="note">No club matches.</p>`}</div>
+    <div class="clubbox">${shown.map(c => `<div class="clubrow"><label class="clubpick" title="Follow this club"><input type="checkbox" data-ind-club="${esc(clubKey(c))}" ${sel.has(clubKey(c)) ? "checked" : ""} aria-label="Follow ${esc(c.name)}"></label><button type="button" class="clubopt clubgo" data-ind-open="${esc(clubKey(c))}">${logoHtml(c.name, "lg")}<span class="cname"><b>${esc(c.name)}</b><small>${esc(c.city)}</small></span><small class="ccount">${plural(c.rides.length, "ride", "rides")}</small><span class="chev" aria-hidden="true">›</span></button></div>`).join("") || `<p class="note">No club matches.</p>`}</div>
     <div class="flabel">When</div>
     <div class="dchips">${[["up", "Upcoming"], ["past", "Earlier"], ["all", "All"]].map(([k, t]) => `<button type="button" class="dchip" data-ind-when="${k}" aria-pressed="${ind.when === k}">${t}</button>`).join("")}</div>
     <div class="flabel">Distance</div>
