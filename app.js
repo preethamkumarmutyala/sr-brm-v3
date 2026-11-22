@@ -231,7 +231,6 @@ async function api(path, body) {          // talks to the Worker; sends the team
 }
 const crossCache = {}, markCache = {}, progressCache = {};
 async function fetchCrossings(id, force) {
-  if (otherClub()) { crossCache[id] = []; markCache[id] = []; progressCache[id] = []; return crossCache[id]; }   // control times are kept for our own club only
   if (!force && crossCache[id]) return crossCache[id];
   try { const j = await api(`/crossings/${id}`); crossCache[id] = j.crossings || []; markCache[id] = j.marks || []; progressCache[id] = j.progress || []; } catch (_) { crossCache[id] = crossCache[id] || []; }
   return crossCache[id];
@@ -446,7 +445,7 @@ function renderDetail() {
       <div class="scroll"><table>
         <thead><tr><th>#</th><th>Rider</th><th>AIR no.</th><th>Club</th><th>Fee paid</th><th>Medal</th><th>Result</th><th>Status</th></tr></thead>
         <tbody id="rows"></tbody></table></div>`)}
-    ${!otherClub() && (cr.length || progressCache[current]?.length || status.k === "ongoing") ? sec("live", "Live control board", new Set([...cr.map(x => x.air), ...(progressCache[current] || []).map(x => x.air)]).size || null, boardHtml(ev, route, cr, ev.date || ride.date, progressCache[current] || []), secOpen.live ?? status.k === "ongoing") : ""}
+    ${(cr.length || progressCache[current]?.length || status.k === "ongoing") ? sec("live", "Live control board", new Set([...cr.map(x => x.air), ...(progressCache[current] || []).map(x => x.air)]).size || null, boardHtml(ev, route, cr, ev.date || ride.date, progressCache[current] || []), secOpen.live ?? status.k === "ongoing") : ""}
     ${controls ? sec("controls", "Controls (check-points)", ctl.length, table(controlHeads, controls)) : ""}
     ${cues ? sec("cue", "Cue sheet (turn by turn)", cue.length, table(cueHeads, cues)) : (route === null ? '<p class="note">Controls and cue sheet are not on Audax yet.</p>' : "")}`;
 
@@ -764,6 +763,7 @@ async function renderTeam() {
     const pick = opts.find(r => rideStatus(r).k === "ongoing") || opts.find(r => r.date >= todayIST()) || opts[opts.length - 1];
     desk.ride = pick ? pick.id : ""; desk.control = "";
   }
+  if (!opts.length) { detailEl.innerHTML = `<h2>Team desk</h2><p class="note">Open a club from <b>Clubs</b> first, then come back here to record control times for its rides.</p>`; return; }
   const tab = (k, label) => `<button type="button" class="subbtn" data-team="tab" data-tab="${k}" aria-pressed="${desk.tab === k}">${label}</button>`;
   let html = `<h2>Team desk</h2><p class="note">Signed in as <b>${esc(t.email)}</b> (${esc(t.role)}). <button type="button" class="linkbtn" data-team="password">Change password</button> · <button type="button" class="linkbtn" data-team="signout">Sign out</button></p>
     <div class="subnav">${tab("desk", "Control desk")}${tab("track", "Live tracking")}${t.role === "admin" ? tab("users", "Manage users") : ""}</div>`;
@@ -1250,7 +1250,6 @@ document.addEventListener("click", e => {
 
 // ---------- routing and refresh ----------
 function select() {
-  if (location.hash.slice(1).split("?", 1)[0] === "team" && (!club || otherClub())) { const hk = india?.clubs.find(x => x.home); if (hk) { setClub(clubKey(hk)); return; } }   // the hidden team desk belongs to the home club
   const [h] = location.hash.slice(1).split("?", 1), wk = weekRides();
   const byDistance = /^(200|300|400|600)$/.test(h) ? wk.find(r => r.distance === h) : null;   // old links like #600
   if (/^e\d+$/.test(h)) current = h.slice(1);
