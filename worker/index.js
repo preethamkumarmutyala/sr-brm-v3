@@ -154,7 +154,7 @@ function parseCalendar(html, year, club) {
 // Reads EVERY club's row of an Audax calendar page (used by the all-clubs view; parseCalendar above is untouched).
 // Each table row is: club | JAN ... DEC | summary. We learn where the club-name cell sits from our own club's row.
 function parseAllClubs(html, year) {
-  const rows = html.split(/<tr[\s>]/i).slice(1).map(r => r.split(/<t[dh][\s>]/i).slice(1));
+  const rows = html.split(/<tr\b[^>]*>/i).slice(1).map(r => r.split(/<t[dh]\b[^>]*>/i).slice(1));
   const own = rows.map(cells => cells.findIndex(c => clean(c).toLowerCase().includes(CLUB.toLowerCase()))).find(i => i >= 0);
   const nameAt = own === undefined ? 0 : own;
   const pad = n => String(n).padStart(2, "0");
@@ -782,6 +782,14 @@ export default {
         return json(request, data, 200, { "Cache-Control": "public, max-age=300", "X-Cache": cache });
       }
 
+      if (a === "all" && env.STAGING_MODE === "true" && url.searchParams.get("debug") === "1") {
+        const html = await fetchText(CALENDAR_HOME);
+        const rows = html.split(/<tr\b[^>]*>/i).slice(1).map(r => r.split(/<t[dh]\b[^>]*>/i).slice(1));
+        const pick = rows.map((cells, i) => ({ i, n: cells.length, first: clean(cells[0] || "").slice(0, 60) }));
+        const want = rows.map((cells, i) => [cells, i]).filter(([cells]) => /secunderabad|bangalore|ahmedabad/i.test(clean(cells.join(" ")))).slice(0, 4)
+          .map(([cells, i]) => ({ i, n: cells.length, cells: cells.slice(0, 4).map(c => c.slice(0, 160)), last: (cells[cells.length - 1] || "").slice(0, 120) }));
+        return json(request, { rowCount: rows.length, rows: pick, sample: want }, 200, { "Cache-Control": "no-store" });
+      }
       if (a === "all") {
         const { data, cache } = await getAllClubs(ctx);
         return json(request, data, 200, { "Cache-Control": "public, max-age=300", "X-Cache": cache });
