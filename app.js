@@ -1222,6 +1222,21 @@ detailEl.addEventListener("submit", e => {
   if (/^\d+$/.test(v) || !first) loadMe(v); else loadMe(first.dataset.meAir);   // a number goes straight in; a name takes the top match
 });
 
+// Home = a clean start: forget the chosen club, the club search and every filter, and show the front page again.
+function goHome() {
+  ind = { picked: [], dist: "all", month: "all", when: "up", q: "" }; saveClubs();
+  meData = null; meErr = ""; meBusy = false;
+  Object.keys(secOpen).forEach(k => delete secOpen[k]); Object.assign(secOpen, { riders: true, controls: false, cue: false });
+  setClub(null, "india");
+}
+document.addEventListener("click", e => {
+  const a = e.target.closest("a.homebtn, a.homelink");
+  if (!a || e.metaKey || e.ctrlKey || e.shiftKey) return;
+  e.preventDefault();
+  goHome();
+  window.scrollTo?.(0, 0);
+});
+
 // ---------- routing and refresh ----------
 function select() {
   if (location.hash.slice(1).split("?", 1)[0] === "team" && (!club || otherClub())) { const hk = india?.clubs.find(x => x.home); if (hk) { setClub(clubKey(hk)); return; } }   // the hidden team desk belongs to the home club
