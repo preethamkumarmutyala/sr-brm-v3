@@ -847,8 +847,9 @@ async function handleHistory(request, env, air) {
       if (/^\d+$/.test(dist)) km += Number(dist);
       (seasons[r.date.slice(0, 4)] ||= new Set()).add(dist);
     }
-    if (r.medal) medals++;
-    return { id: r.event_id, date: r.date, distance: dist, club: r.club, result: r.result, finished: ok };
+    if (ok && /^y/i.test(r.medal || "")) medals++;                    // Audax writes "Yes" or "No" in the medal column
+    const pending = !ok && ["", "DNS"].includes(String(r.result || "").trim().toUpperCase()) && r.date >= daysAgoISO(5);   // results are filled in a few days after a ride
+    return { id: r.event_id, date: r.date, distance: dist, club: r.club, result: r.result, finished: ok, pending };
   });
   const seasonList = Object.entries(seasons).sort((a, b) => b[0].localeCompare(a[0])).map(([year, set]) => ({
     year, distances: [...set], sr: ["200", "300", "400", "600"].every(x => set.has(x)) }));

@@ -1,8 +1,8 @@
 // Lets the site install as an app and open even with a weak connection.
 // Network first: you always get the newest version when online; the saved copy is only used offline.
 // Live rider data comes from the Worker (another address) and is never saved here.
-const CACHE = "sr-brm-v3";
-const SHELL = ["./", "index.html", "style.css", "app.js", "assets/logo.png", "assets/apple-touch-icon.png", "manifest.webmanifest",
+const CACHE = "audax-india-v1";
+const SHELL = ["./", "index.html", "style.css", "app.js", "assets/air-logo.png", "assets/apple-touch-icon.png", "manifest.webmanifest",
   "assets/leaflet/leaflet.css", "assets/leaflet/leaflet.js", "assets/leaflet/images/layers.png", "assets/leaflet/images/layers-2x.png",
   "assets/leaflet/images/marker-icon.png", "assets/leaflet/images/marker-icon-2x.png", "assets/leaflet/images/marker-shadow.png"];
 

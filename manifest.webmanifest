@@ -1,7 +1,7 @@
 {
-  "name": "SR BRM Staging",
-  "short_name": "SR Staging",
-  "description": "Staging test site for Secunderabad Randonneurs",
+  "name": "Audax India Staging",
+  "short_name": "Audax India",
+  "description": "Staging test site for Audax India rides, clubs and rider history",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

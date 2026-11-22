@@ -301,7 +301,7 @@ clubbarEl.id = "clubbar";
 tilesEl.parentNode.insertBefore(clubbarEl, tilesEl);
 const brandEl = document.querySelector(".brand h1");
 function renderClubBar() {
-  if (brandEl) brandEl.textContent = club ? club.name : "Audax India Clubs";
+  if (brandEl) brandEl.textContent = club ? club.name : "Audax India";
   clubbarEl.innerHTML = club ? `<div class="clubbar"><span>Club: <b>${esc(club.city)} · ${esc(club.name)}</b></span><button type="button" class="linkbtn" data-change>Change club</button></div>` : "";
 }
 clubbarEl.addEventListener("click", e => { if (e.target.closest("[data-change]")) location.hash = "india"; });
@@ -1160,8 +1160,8 @@ function renderMe() {
       <div class="stats">${dists.filter(x => d.byDistance[x]).map(x => tile(d.byDistance[x], x === "Fleche" ? "Fleche" : x + " km")).join("") || `<p class="note">No finished rides yet.</p>`}</div>
       <div class="flabel">Season by season</div>
       <div class="seasonrows">${d.seasons.map(x => `<div class="srow"><b>${esc(x.year)}</b><span>${["200", "300", "400", "600"].map(k => `<span class="dot ${x.distances.includes(k) ? "on" : ""}">${k}</span>`).join("")}</span>${x.sr ? `<span class="chip">Super Randonneur</span>` : ""}</div>`).join("") || `<p class="note">No finished seasons yet.</p>`}</div>
-      <div class="flabel">All rides (${d.ridden})</div>
-      <div class="ilist">${d.rides.map(r => `<a class="irow" href="#e${esc(r.id)}"><span class="irow-date">${esc(dayLabel(r.date))}<small>${esc(r.date.slice(0, 4))}</small></span><span class="irow-main"><b>${esc(r.distance === "Fleche" ? "Fleche" : r.distance + " km")}</b><small>${esc(r.club)}</small></span><span class="irow-st${r.finished ? "" : " dim"}">${esc(r.finished ? r.result : (r.result || "Registered"))}</span></a>`).join("")}</div>
+      <div class="flabel">All rides entered (${d.ridden}). Only finished rides count towards the totals above</div>
+      <div class="ilist">${d.rides.map(r => `<a class="irow" href="#e${esc(r.id)}"><span class="irow-date">${esc(dayLabel(r.date))}<small>${esc(r.date.slice(0, 4))}</small></span><span class="irow-main"><b>${esc(r.distance === "Fleche" ? "Fleche" : r.distance + " km")}</b><small>${esc(r.club)}</small></span><span class="irow-st${r.finished ? "" : " dim"}">${esc(r.finished ? r.result : r.pending ? "Result pending" : (r.result || "Registered"))}</span></a>`).join("")}</div>
       <p class="note">From public Audax ride pages, read since ${esc(d.coverage?.since || "…")}${d.coverage?.stillToRead ? `; ${plural(d.coverage.stillToRead, "page", "pages")} still being read, so older rides may be missing` : ""}. Audax's own records are the official ones.</p>`;
   }
   detailEl.innerHTML = `<h2>My rides</h2><p class="note">Type a name or an AIR number to see a rider’s history: rides done, distances, Super Randonneur years and medals. No password is needed because this comes from public ride results.</p>${form}${body}`;

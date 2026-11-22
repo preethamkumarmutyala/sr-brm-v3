@@ -353,3 +353,5 @@ a.irow:hover { border-color: var(--brand); }
 .sug { display: flex; justify-content: space-between; align-items: center; gap: .6rem; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: .55rem .8rem; font: inherit; color: inherit; cursor: pointer; }
 .sug:hover { border-color: var(--brand); }
 .sug span { color: var(--muted); font-size: .85rem; text-align: right; }
+.logo { background: #fff; border-radius: 14px; padding: .3rem .45rem; height: clamp(3.6rem, 6.5vw, 5.4rem); }
+.foot .acp { display: block; margin: .8rem auto 0; height: 3.2rem; width: auto; background: #fff; border-radius: 10px; padding: .3rem .6rem; }
