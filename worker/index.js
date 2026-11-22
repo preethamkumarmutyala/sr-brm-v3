@@ -386,7 +386,7 @@ async function whoIs(request, env) {
   const token = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
   if (!token || !env.DB) return null;
   const d = await db(env), digest = await hash(token);
-  const row = await d.prepare("SELECT u.email, u.role, u.status FROM team_sessions s JOIN team_users u ON u.email=s.email WHERE s.token_hash=? AND s.expires>? AND u.status='active'")
+  const row = await d.prepare("SELECT u.email, u.role, u.status, u.clubs FROM team_sessions s JOIN team_users u ON u.email=s.email WHERE s.token_hash=? AND s.expires>? AND u.status='active'")
     .bind(digest, Date.now()).first();
   return row || null;
 }
@@ -413,9 +413,29 @@ async function db(env) {                  // the tables are created automaticall
       q("CREATE TABLE IF NOT EXISTS rider_marks (id INTEGER PRIMARY KEY AUTOINCREMENT, ride_id TEXT NOT NULL, air TEXT NOT NULL, mark TEXT NOT NULL, ts INTEGER NOT NULL, entered_by TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0)"),
       q("CREATE INDEX IF NOT EXISTS idx_marks_ride ON rider_marks (ride_id, deleted)")
     ]);
+    const cols = (await env.DB.prepare("PRAGMA table_info(team_users)").all()).results || [];
+    if (!cols.some(c => c.name === "clubs")) await env.DB.prepare("ALTER TABLE team_users ADD COLUMN clubs TEXT").run();   // which clubs an organiser may control (JSON list); empty = the home club only
     dbReady = true;
   }
   return env.DB;
+}
+
+// Club access: administrators control every club; everyone else only the clubs listed for them (the home club until an administrator says otherwise)
+const clubKeyOf = c => `${c.city}|${c.name}`;
+async function clubsFor(who, ctx) {
+  if (who.role === "admin") return "*";
+  let list = null;
+  try { list = who.clubs ? JSON.parse(who.clubs) : null; } catch (_) {}
+  if (Array.isArray(list)) return list;
+  const { data } = await getAllClubs(ctx), home = data.clubs.find(c => c.home);
+  return home ? [clubKeyOf(home)] : [];
+}
+async function mayControl(who, ctx, rideId) {
+  const allowed = await clubsFor(who, ctx);
+  if (allowed === "*") return true;
+  const { data } = await getAllClubs(ctx);
+  const c = data.clubs.find(x => x.rides.some(r => String(r.id) === String(rideId)));
+  return !!c && allowed.includes(clubKeyOf(c));
 }
 
 // Control times: anyone can read them, only the signed-in team can add or remove
@@ -556,7 +576,7 @@ async function handleTeam(request, env, b, c, ctx) {
 
   const who = await whoIs(request, env);
   if (!who) return json(request, { error: "Please sign in" }, 401);
-  if (b === "me") return json(request, { email: who.email, role: who.role });
+  if (b === "me") return json(request, { email: who.email, role: who.role, clubs: await clubsFor(who, ctx) });
   if (b === "logout" && post) { await d.prepare("DELETE FROM team_sessions WHERE token_hash=?").bind(await hash((request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, ""))).run(); return json(request, { ok: true }); }
   if (b === "password" && post) {
     const old = String(body.currentPassword || ""), user = await d.prepare("SELECT salt,password_hash FROM team_users WHERE email=?").bind(who.email).first();
@@ -568,18 +588,20 @@ async function handleTeam(request, env, b, c, ctx) {
   }
   if (b === "users") {
     if (who.role !== "admin") return json(request, { error: "Administrator access required." }, 403);
-    if (!post) { const { results } = await d.prepare("SELECT email,role,status,created_at FROM team_users ORDER BY email").all(); return json(request, { users: results }); }
+    if (!post) { const { results } = await d.prepare("SELECT email,role,status,created_at,clubs FROM team_users ORDER BY email").all();
+      const users = []; for (const u of results) users.push({ email: u.email, role: u.role, status: u.status, created_at: u.created_at, clubs: await clubsFor(u, ctx) });
+      return json(request, { users }); }
     const email = normEmail(body.email), role = body.role === "admin" ? "admin" : "editor";
+    const clubsJson = role === "admin" || !Array.isArray(body.clubs) ? null : JSON.stringify([...new Set(body.clubs.map(x => String(x).slice(0, 160)))].slice(0, 120));
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json(request, { error: "Enter a valid email address." }, 400);
     if (email === who.email && role !== "admin") return json(request, { error: "You cannot remove your own administrator access." }, 400);
     const existing = await d.prepare("SELECT role,status FROM team_users WHERE email=?").bind(email).first();
     if (existing?.status === "active") {
-      if (existing.role === role) return json(request, { error: "This user already has that access level." }, 409);
-      await d.prepare("UPDATE team_users SET role=?,updated_at=? WHERE email=?").bind(role,Date.now(),email).run();
+      await d.prepare("UPDATE team_users SET role=?,clubs=?,updated_at=? WHERE email=?").bind(role,clubsJson,Date.now(),email).run();
       return json(request, { ok: true, message: "Access updated." });
     }
-    await d.prepare("INSERT INTO team_users (email,role,status,created_by,created_at,updated_at) VALUES (?,?,'invited',?,?,?) ON CONFLICT(email) DO UPDATE SET role=excluded.role,status=CASE WHEN team_users.status='active' THEN team_users.status ELSE 'invited' END,updated_at=excluded.updated_at")
-      .bind(email,role,who.email,Date.now(),Date.now()).run();
+    await d.prepare("INSERT INTO team_users (email,role,status,created_by,created_at,updated_at,clubs) VALUES (?,?,'invited',?,?,?,?) ON CONFLICT(email) DO UPDATE SET clubs=excluded.clubs,role=excluded.role,status=CASE WHEN team_users.status='active' THEN team_users.status ELSE 'invited' END,updated_at=excluded.updated_at")
+      .bind(email,role,who.email,Date.now(),Date.now(),clubsJson).run();
     try { await issueMail(email,"invite",who); } catch (err) { return json(request, { error: err.message }, 503); }
     return json(request, { ok: true });
   }
@@ -599,11 +621,14 @@ async function handleTeam(request, env, b, c, ctx) {
 
   if (b === "crossing" && post) {                                   // record, correct or remove a control time
     if (c === "delete") {
+      const row = await d.prepare("SELECT ride_id FROM crossings WHERE id = ?").bind(Number(body.id)).first();
+      if (row && !await mayControl(who, ctx, row.ride_id)) return json(request, { error: "You can only change rides of your own club." }, 403);
       await d.prepare("UPDATE crossings SET deleted = 1 WHERE id = ?").bind(Number(body.id)).run();
       return json(request, { ok: true });
     }
     const rideId = String(body.rideId || ""), no = Number(body.controlNo), air = String(body.air || "").trim();
     if (!/^\d{3,6}$/.test(rideId) || !Number.isInteger(no) || no < 1 || no > 500 || !validAir(air)) return json(request, { error: "The ride, control or AIR number is not valid." }, 400);
+    if (!await mayControl(who, ctx, rideId)) return json(request, { error: "You can only change rides of your own club." }, 403);
     const ts = Number(body.ts) || Date.now();
     if (ts > Date.now() + 10 * 60e3) return json(request, { error: "That time is in the future." }, 400);
     const isFirstStart = no === 1 && !await d.prepare("SELECT 1 AS yes FROM crossings WHERE ride_id=? AND control_no=1 AND air=? AND deleted=0 LIMIT 1").bind(rideId, air).first();
@@ -622,6 +647,7 @@ async function handleTeam(request, env, b, c, ctx) {
   if (b === "mark" && post) {                                       // team sets a rider as "did not start" / "did not finish", or clears it
     const rideId = String(body.rideId || ""), air = String(body.air || "").trim(), mark = String(body.mark || "");
     if (!/^\d{3,6}$/.test(rideId) || !validAir(air) || !["dns", "dnf", "clear"].includes(mark)) return json(request, { error: "The ride, rider or status is not valid." }, 400);
+    if (!await mayControl(who, ctx, rideId)) return json(request, { error: "You can only change rides of your own club." }, 403);
     const ops = [d.prepare("UPDATE rider_marks SET deleted = 1 WHERE ride_id = ? AND air = ? AND deleted = 0").bind(rideId, air)];
     if (mark !== "clear") ops.push(d.prepare("INSERT INTO rider_marks (ride_id, air, mark, ts, entered_by) VALUES (?, ?, ?, ?, ?)").bind(rideId, air, mark, Date.now(), who.email));
     await d.batch(ops);
@@ -644,6 +670,7 @@ async function handleTeam(request, env, b, c, ctx) {
   }
 
   if (b === "tracking" && /^\d{3,6}$/.test(c || "")) {              // latest known position of each tracked rider
+    if (!await mayControl(who, ctx, c)) return json(request, { error: "You can only see rides of your own club." }, 403);
     const { data: cal } = await getCalendar(ctx);
     const ride = cal.rides.find(r => String(r.id) === c);
     if (!ride) return json(request, { positions: [] }, 200, { "Cache-Control": "no-store" });
@@ -658,6 +685,7 @@ async function handleTeam(request, env, b, c, ctx) {
     return json(request, { positions: results }, 200, { "Cache-Control": "no-store" });
   }
   if (b === "route" && /^\d{3,6}$/.test(c || "")) {                  // private route geometry for the team map
+    if (!await mayControl(who, ctx, c)) return json(request, { error: "You can only see rides of your own club." }, 403);
     if (!post) {
       const row = await d.prepare("SELECT points_json, point_count, updated, updated_by FROM ride_routes WHERE ride_id=?").bind(c).first();
       return json(request, { route: row ? { points: JSON.parse(row.points_json), pointCount: row.point_count, updated: row.updated, updatedBy: row.updated_by } : null }, 200, { "Cache-Control": "no-store" });

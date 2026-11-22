@@ -704,8 +704,9 @@ async function ask() {
 }
 
 // ---------- team area (hidden address: #team) ----------
-let desk = { tab: "desk", ride: "", control: "", q: "", sel: "", mode: "type", extra: [] };
+let desk = { tab: "desk", club: "", ride: "", control: "", q: "", sel: "", mode: "type", extra: [] };
 let teamTimer = null;
+const deskRideOf = id => { for (const c of india?.clubs || []) { const r = c.rides.find(x => x.id === id); if (r) return r; } return rides.find(x => x.id === id); };   // the desk can show any club's ride
 let teamMapInstance = null;
 const tripLabel = r => { const f = dateParts(r.date); return `${f.wd} ${f.d} ${MON[f.m - 1]}, ${kmLabel(r.distance)}`; };
 const clockNow = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(11, 16);
@@ -760,21 +761,30 @@ async function renderTeam() {
   teamMapInstance?.remove(); teamMapInstance = null;
   const t = getTeam();
   if (!t) return renderLogin();
-    const opts = rides.filter(r => r.id).slice().sort(byDate); // all calendar events are available for review and corrections
+  let me;
+  try { me = await api("/team/me"); } catch (err) { if (!getTeam()) return renderLogin(); detailEl.innerHTML = `<h2>Team desk</h2><p class="error">${esc(err.message)}</p>`; return; }
+  await ensureIndia(); if (current !== "team") return;
+  const isAdmin = t.role === "admin";
+  const myClubs = (india?.clubs || []).filter(c => me.clubs === "*" || (me.clubs || []).includes(clubKey(c))).sort((a, b) => a.city.localeCompare(b.city));
+  const tab = (k, label) => `<button type="button" class="subbtn" data-team="tab" data-tab="${k}" aria-pressed="${desk.tab === k}">${label}</button>`;
+  let html = `<h2>Team desk</h2><p class="note">Signed in as <b>${esc(t.email)}</b> (${isAdmin ? "master administrator, every club" : myClubs.length === 1 ? "organiser of " + esc(myClubs[0].name) : `organiser of ${myClubs.length} clubs`}). <button type="button" class="linkbtn" data-team="password">Change password</button> · <button type="button" class="linkbtn" data-team="signout">Sign out</button></p>
+    <div class="subnav">${tab("desk", "Control desk")}${tab("track", "Live tracking")}${isAdmin ? tab("users", "Manage users") : ""}</div>`;
+  if (desk.tab === "users" && t.role === "admin") { detailEl.innerHTML = html + `<div id="deskBody">${loading("Loading users…")}</div>`; await renderUsers(); return; }
+  if (!myClubs.length) { detailEl.innerHTML = html + `<p class="note">You don't have access to any club yet. Ask the administrator to give you your club.</p>`; return; }
+  if (!myClubs.some(c => clubKey(c) === desk.club)) { const pref = club && myClubs.find(c => clubKey(c) === clubKey(club)); desk.club = clubKey(pref || myClubs.find(c => c.home) || myClubs[0]); desk.ride = ""; }
+  const dClub = myClubs.find(c => clubKey(c) === desk.club);
+  const opts = dClub.rides.filter(r => r.id).slice().sort(byDate);
   if (!opts.some(r => r.id === desk.ride)) {
     const pick = opts.find(r => rideStatus(r).k === "ongoing") || opts.find(r => r.date >= todayIST()) || opts[opts.length - 1];
     desk.ride = pick ? pick.id : ""; desk.control = "";
   }
-  if (!opts.length) { detailEl.innerHTML = `<h2>Team desk</h2><p class="note">Open a club from <b>Clubs</b> first, then come back here to record control times for its rides.</p>`; return; }
-  const tab = (k, label) => `<button type="button" class="subbtn" data-team="tab" data-tab="${k}" aria-pressed="${desk.tab === k}">${label}</button>`;
-  let html = `<h2>Team desk</h2><p class="note">Signed in as <b>${esc(t.email)}</b> (${esc(t.role)}). <button type="button" class="linkbtn" data-team="password">Change password</button> · <button type="button" class="linkbtn" data-team="signout">Sign out</button></p>
-    <div class="subnav">${tab("desk", "Control desk")}${tab("track", "Live tracking")}${t.role === "admin" ? tab("users", "Manage users") : ""}</div>`;
-  if (desk.tab === "users" && t.role === "admin") { detailEl.innerHTML = html + `<div id="deskBody">${loading("Loading users…")}</div>`; await renderUsers(); return; }
-  if (!opts.length) { detailEl.innerHTML = html + `<p class="note">There is no ride in the next few days.</p>`; return; }
-  html += `<div class="tools"><select id="deskRide" aria-label="Ride">${opts.map(r => `<option value="${r.id}" ${r.id === desk.ride ? "selected" : ""}>${esc(tripLabel(r))}</option>`).join("")}</select></div>
+  const clubPicker = myClubs.length > 1 ? `<select id="deskClub" aria-label="Club">${myClubs.map(c => `<option value="${esc(clubKey(c))}" ${clubKey(c) === desk.club ? "selected" : ""}>${esc(c.city)} · ${esc(c.name)}</option>`).join("")}</select>` : `<b class="deskclub">${esc(dClub.city)} · ${esc(dClub.name)}</b>`;
+  if (!opts.length) { detailEl.innerHTML = html + `<div class="tools">${clubPicker}</div><p class="note">${esc(dClub.name)} has no ride with a registration page yet.</p>`; document.getElementById("deskClub")?.addEventListener("change", e => { desk.club = e.target.value; desk.ride = ""; renderTeam(); }); return; }
+  html += `<div class="tools">${clubPicker}<select id="deskRide" aria-label="Ride">${opts.map(r => `<option value="${r.id}" ${r.id === desk.ride ? "selected" : ""}>${esc(tripLabel(r))}</option>`).join("")}</select></div>
     <div id="deskBody">${loading("Loading…")}</div>`;
   detailEl.innerHTML = html;
   document.getElementById("deskRide").addEventListener("change", e => { desk.ride = e.target.value; desk.control = ""; renderTeam(); });
+  document.getElementById("deskClub")?.addEventListener("change", e => { desk.club = e.target.value; desk.ride = ""; desk.control = ""; renderTeam(); });
   try {
     await Promise.all([fetchEvent(desk.ride), fetchRoute(desk.ride), fetchCrossings(desk.ride, true)]);
     if (current !== "team") return;
@@ -789,9 +799,29 @@ async function renderUsers() {
   const body = document.getElementById("deskBody"); if (!body) return;
   try {
     const j = await api("/team/users"); if (current !== "team" || desk.tab !== "users") return;
-    body.innerHTML = `<h3>Invite a teammate</h3><form id="inviteUser" class="ask"><input name="email" type="email" placeholder="Email address" required><select name="role"><option value="editor">Can edit ride data</option><option value="admin">Administrator</option></select><button class="btn" type="submit">Send invitation</button></form>
-      <div class="scroll"><table><thead><tr><th>Email</th><th>Access</th><th>Status</th><th>Action</th></tr></thead><tbody>${j.users.map(u => `<tr><td>${esc(u.email)}</td><td>${esc(u.role)}</td><td>${esc(u.status)}</td><td><button type="button" class="linkbtn" data-team="${u.status === "disabled" ? "enable" : u.status === "invited" ? "resend" : "disable"}" data-email="${esc(u.email)}">${u.status === "disabled" ? "Re-enable" : u.status === "invited" ? "Resend invite" : "Disable"}</button></td></tr>`).join("")}</tbody></table></div><p id="userMessage" class="note" aria-live="polite"></p>`;
-    document.getElementById("inviteUser").addEventListener("submit", async e => { e.preventDefault(); const f = new FormData(e.currentTarget); try { const result = await api("/team/users", { email: f.get("email"), role: f.get("role") }); await renderUsers(); const m = document.getElementById("userMessage"); if (m) m.textContent = result.message || "Invitation sent."; } catch (err) { alert(err.message); } });
+    await ensureIndia(); if (current !== "team" || desk.tab !== "users") return;
+    const all = (india?.clubs || []).slice().sort((x, y) => x.city.localeCompare(y.city)), byKey = Object.fromEntries(all.map(c => [clubKey(c), c]));
+    const access = u => u.role === "admin" || u.clubs === "*" ? "Every club" : (u.clubs || []).map(k => byKey[k]?.city || k.split("|")[0]).join(", ") || "No club yet";
+    body.innerHTML = `<h3>Give a teammate access</h3><p class="note">A <b>club organiser</b> can only control the clubs ticked below. A <b>master administrator</b> controls every club and manages users.</p>
+      <form id="inviteUser" class="ask accessform"><input name="email" type="email" placeholder="Email address" required>
+        <select name="role"><option value="editor">Club organiser (only the clubs ticked below)</option><option value="admin">Master administrator (every club)</option></select>
+        <div id="clubPick"><input type="search" id="clubPickQ" class="isearch" placeholder="Search clubs to tick" autocomplete="off" aria-label="Search clubs"><div class="clubbox pickbox">${all.map(c => `<label class="pickrow" data-q="${esc((c.city + " " + c.name).toLowerCase())}"><input type="checkbox" name="clubs" value="${esc(clubKey(c))}"><span><b>${esc(c.name)}</b> <small>${esc(c.city)}</small></span></label>`).join("")}</div></div>
+        <button class="btn" type="submit" id="accessSave">Save and send invitation</button> <button class="btn alt" type="button" id="accessReset" hidden>Cancel</button></form>
+      <div class="scroll"><table><thead><tr><th>Email</th><th>Access</th><th>Clubs</th><th>Status</th><th>Action</th></tr></thead><tbody>${j.users.map(u => `<tr><td>${esc(u.email)}</td><td>${u.role === "admin" ? "Master" : "Organiser"}</td><td>${esc(access(u))}</td><td>${esc(u.status)}</td><td><button type="button" class="linkbtn" data-edit-access="${esc(u.email)}">Edit access</button> · <button type="button" class="linkbtn" data-team="${u.status === "disabled" ? "enable" : u.status === "invited" ? "resend" : "disable"}" data-email="${esc(u.email)}">${u.status === "disabled" ? "Re-enable" : u.status === "invited" ? "Resend invite" : "Disable"}</button></td></tr>`).join("")}</tbody></table></div><p id="userMessage" class="note" aria-live="polite"></p>`;
+    const form = document.getElementById("inviteUser"), pick = document.getElementById("clubPick"), roleSel = form.elements.role;
+    const syncRole = () => { pick.hidden = roleSel.value === "admin"; }; roleSel.addEventListener("change", syncRole); syncRole();
+    document.getElementById("clubPickQ").addEventListener("input", e => { const q = e.target.value.trim().toLowerCase(); pick.querySelectorAll(".pickrow").forEach(l => { l.hidden = !!q && !l.dataset.q.includes(q); }); });
+    const resetForm = () => { form.reset(); form.elements.email.readOnly = false; document.getElementById("accessSave").textContent = "Save and send invitation"; document.getElementById("accessReset").hidden = true; syncRole(); pick.querySelectorAll(".pickrow").forEach(l => { l.hidden = false; }); };
+    document.getElementById("accessReset").addEventListener("click", resetForm);
+    body.querySelectorAll("[data-edit-access]").forEach(btn => btn.addEventListener("click", () => {
+      const u = j.users.find(x => x.email === btn.dataset.editAccess); if (!u) return;
+      form.elements.email.value = u.email; form.elements.email.readOnly = true; roleSel.value = u.role === "admin" ? "admin" : "editor"; syncRole();
+      const have = new Set(u.clubs === "*" ? [] : u.clubs || []); form.querySelectorAll('input[name="clubs"]').forEach(cb => { cb.checked = have.has(cb.value); });
+      document.getElementById("accessSave").textContent = "Save access"; document.getElementById("accessReset").hidden = false; form.scrollIntoView({ behavior: "smooth", block: "start" });
+    }));
+    form.addEventListener("submit", async e => { e.preventDefault(); const f = new FormData(form), role = f.get("role"), clubs = f.getAll("clubs"), m = document.getElementById("userMessage");
+      if (role === "editor" && !clubs.length) { m.textContent = "Tick at least one club for an organiser."; m.className = "note error"; return; }
+      try { const result = await api("/team/users", { email: f.get("email"), role, clubs }); await renderUsers(); const mm = document.getElementById("userMessage"); if (mm) mm.textContent = result.message || "Saved. An invitation email was sent."; } catch (err) { m.textContent = err.message; m.className = "note error"; } });
   } catch (err) { body.innerHTML = `<p class="error">${esc(err.message)}</p>`; }
 }
 
@@ -829,7 +859,7 @@ function parseCell(text, rideDate, startMs) {
 function renderDesk() {
   const body = document.getElementById("deskBody");
   if (!body || current !== "team") return;
-  const ev = cache[desk.ride], route = routeCache[desk.ride], ride = rides.find(r => r.id === desk.ride) || { id: desk.ride, date: todayIST() };
+  const ev = cache[desk.ride], route = routeCache[desk.ride], ride = deskRideOf(desk.ride) || { id: desk.ride, date: todayIST() };
   const ctl = route?.controls || [], cr = crossCache[desk.ride] || [], marks = markCache[desk.ride] || [];
   if (!ctl.length) { body.innerHTML = `<p class="error">This ride's controls are not available from Audax yet, so times can't be recorded.</p>`; return; }
   const markOf = air => marks.find(m => sameAir(m.air, air));
@@ -875,7 +905,7 @@ function renderDesk() {
 
 async function saveCell(el) {
   const air = el.dataset.air, no = Number(el.dataset.no), text = el.value.trim();
-  const ride = rides.find(r => r.id === desk.ride) || { id: desk.ride, date: todayIST() };
+  const ride = deskRideOf(desk.ride) || { id: desk.ride, date: todayIST() };
   const prev = (crossCache[desk.ride] || []).find(x => Number(x.no) === no && sameAir(x.air, air));
   try {
     if (!text) { if (prev) await api("/team/crossing/delete", { id: prev.id }); }
@@ -973,7 +1003,7 @@ async function renderTrackAdmin() {
   const [codes, tr, routeData] = await Promise.all([api("/team/codes"), api(`/team/tracking/${desk.ride}`), api(`/team/route/${desk.ride}`)]);
   const body = document.getElementById("deskBody");
   if (!body || current !== "team") return;
-  const ev = cache[desk.ride], ride = rides.find(r => r.id === desk.ride), live = ride && rideStatus(ride).k === "ongoing";
+  const ev = cache[desk.ride], ride = deskRideOf(desk.ride), live = ride && rideStatus(ride).k === "ongoing";
   const codeOf = air => codes.codes.find(c => sameAir(c.air, air)), posOf = air => tr.positions.find(p => sameAir(p.air, air));
   const route = routeData.route, riders = ev?.riders || [], positioned = tr.positions.filter(p => riders.some(r => sameAir(r.air, p.air)) || desk.ride === "999999");
   const ago = ts => { const m = Math.max(0, Math.round((Date.now() - ts) / 60000)); return m < 60 ? `${m} min ago` : `${Math.floor(m / 60)}h ${m % 60}m ago`; };
@@ -1018,7 +1048,7 @@ async function renderTrackAdmin() {
 detailEl.addEventListener("click", async e => {
   const cell = e.target.closest("input.tcell");
   if (cell && desk.mode === "stamp") {                                   // stamp mode: tapping an empty cell records the time now
-    if (!cell.value) { cell.value = tstr(Date.now(), (rides.find(r => r.id === desk.ride) || { date: todayIST() }).date); await saveCell(cell); }
+    if (!cell.value) { cell.value = tstr(Date.now(), (deskRideOf(desk.ride) || { date: todayIST() }).date); await saveCell(cell); }
     return;
   }
   const t = e.target.closest("[data-team]");
@@ -1035,7 +1065,7 @@ detailEl.addEventListener("click", async e => {
     else if (act === "mode") { desk.mode = t.dataset.mode; renderDesk(); }
     else if (act === "other") { const v = document.getElementById("deskOther").value.trim(); if (v) { desk.extra.push(v); renderDesk(); } }
     else if (act === "startall") {
-      const ctl = routeCache[desk.ride]?.controls || [], no = cno(ctl[0], 0), ride = rides.find(r => r.id === desk.ride) || { date: todayIST() };
+      const ctl = routeCache[desk.ride]?.controls || [], no = cno(ctl[0], 0), ride = deskRideOf(desk.ride) || { date: todayIST() };
       const cr = crossCache[desk.ride] || [], marks = markCache[desk.ride] || [];
       const todo = (cache[desk.ride]?.riders || []).filter(r => !cr.some(x => Number(x.no) === no && sameAir(x.air, r.air)) && !marks.some(m => sameAir(m.air, r.air)));
       if (!todo.length) { alert("Everyone already has a start time or a status."); return; }

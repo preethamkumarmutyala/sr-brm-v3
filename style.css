@@ -385,3 +385,11 @@ a.irow:hover { border-color: var(--brand); }
 .clubgo:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
 .teamlink[hidden]{display:none}
+
+.pickbox{max-height:14rem;overflow:auto;margin-top:.4rem}
+.pickrow{display:flex;gap:.6rem;align-items:center;padding:.35rem .5rem;border-radius:8px;cursor:pointer}
+.pickrow[hidden],#clubPick[hidden]{display:none}
+.pickrow:hover{background:color-mix(in srgb,var(--brand) 8%,transparent)}
+.pickrow small{color:var(--muted)}
+.deskclub{display:inline-block;margin:.2rem .6rem .2rem 0}
+.accessform{display:flex;flex-direction:column;gap:.6rem;align-items:stretch}
