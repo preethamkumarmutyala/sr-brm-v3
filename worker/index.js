@@ -825,6 +825,15 @@ async function handleHistory(request, env, air) {
     const t = await d.prepare("SELECT count(*) n, count(DISTINCT air) riders FROM hist_results").first();
     return json(request, { events: s.results, results: t.n, riders: t.riders }, 200, { "Cache-Control": "no-store" });
   }
+  if (air === "search") {                                           // type part of a name or AIR number, get a short list of riders
+    const q = (new URL(request.url).searchParams.get("q") || "").trim().replace(/[%_\\]/g, "").slice(0, 40);
+    if (q.length < 2) return json(request, { riders: [] }, 200, { "Cache-Control": "no-store" });
+    const terms = q.split(/\s+/).filter(Boolean).slice(0, 4);
+    const where = terms.map(() => "(name LIKE ? OR air LIKE ?)").join(" AND ");
+    const args = terms.flatMap(t => [`%${t}%`, `${airNorm(t)}%`]);
+    const { results } = await d.prepare(`SELECT air, name, count(*) rides, max(date) last, club FROM hist_results WHERE ${where} GROUP BY air ORDER BY rides DESC, name LIMIT 15`).bind(...args).all();
+    return json(request, { riders: results }, 200, { "Cache-Control": "public, max-age=60" });
+  }
   const key = airNorm(air);
   if (!/^[A-Z0-9-]{1,12}$/.test(key)) return json(request, { error: "Enter a valid AIR number" }, 400);
   const { results } = await d.prepare("SELECT event_id, name, date, distance, club, result, medal FROM hist_results WHERE air = ? ORDER BY date DESC").bind(key).all();

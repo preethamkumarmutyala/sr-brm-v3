@@ -1147,7 +1147,7 @@ async function loadMe(air) {
 }
 function renderMe() {
   const d = meData, dists = ["200", "300", "400", "600", "1000", "1200", "Fleche"];
-  const form = `<form id="meForm" class="meform"><input type="text" inputmode="numeric" id="meAir" class="isearch" placeholder="Your AIR number" value="${esc(meAir)}" autocomplete="off" aria-label="AIR number"><button class="btn" type="submit">Show my rides</button></form>`;
+  const form = `<form id="meForm" class="meform"><input type="text" inputmode="numeric" id="meAir" class="isearch" placeholder="Type a name or AIR number" value="${esc(meAir)}" autocomplete="off" aria-label="Name or AIR number"><button class="btn" type="submit">Show rides</button></form><div id="meSug" class="sugbox"></div>`;
   let body = "";
   if (meBusy) body = `<p class="note">Looking up rides…</p>`;
   else if (meErr) body = `<p class="note error">${esc(meErr)}</p>`;
@@ -1164,9 +1164,34 @@ function renderMe() {
       <div class="ilist">${d.rides.map(r => `<a class="irow" href="#e${esc(r.id)}"><span class="irow-date">${esc(dayLabel(r.date))}<small>${esc(r.date.slice(0, 4))}</small></span><span class="irow-main"><b>${esc(r.distance === "Fleche" ? "Fleche" : r.distance + " km")}</b><small>${esc(r.club)}</small></span><span class="irow-st${r.finished ? "" : " dim"}">${esc(r.finished ? r.result : (r.result || "Registered"))}</span></a>`).join("")}</div>
       <p class="note">From public Audax ride pages, read since ${esc(d.coverage?.since || "…")}${d.coverage?.stillToRead ? `; ${plural(d.coverage.stillToRead, "page", "pages")} still being read, so older rides may be missing` : ""}. Audax's own records are the official ones.</p>`;
   }
-  detailEl.innerHTML = `<h2>My rides</h2><p class="note">Enter your AIR number to see your own history: rides done, distances, Super Randonneur years and medals. No password is needed because this comes from public ride results.</p>${form}${body}`;
+  detailEl.innerHTML = `<h2>My rides</h2><p class="note">Type a name or an AIR number to see a rider’s history: rides done, distances, Super Randonneur years and medals. No password is needed because this comes from public ride results.</p>${form}${body}`;
 }
-detailEl.addEventListener("submit", e => { if (e.target.id !== "meForm") return; e.preventDefault(); const v = document.getElementById("meAir").value.trim(); if (v) loadMe(v); });
+let sugTimer = null, sugSeq = 0;
+function showSug(list, q) {
+  const box = document.getElementById("meSug"); if (!box) return;
+  box.innerHTML = list.length ? list.map(r => `<button type="button" class="sug" data-me-air="${esc(r.air)}"><b>${esc(r.name)}</b><span>AIR ${esc(r.air)} · ${plural(r.rides, "ride", "rides")}</span></button>`).join("")
+    : (q ? `<p class="note">No rider matches “${esc(q)}” yet. Older rides are still being read.</p>` : "");
+}
+detailEl.addEventListener("input", e => {
+  if (current !== "me" || e.target.id !== "meAir") return;
+  const q = e.target.value.trim(), seq = ++sugSeq;
+  clearTimeout(sugTimer);
+  if (q.length < 2) { showSug([], ""); return; }
+  sugTimer = setTimeout(async () => {
+    try {
+      const r = await fetch(`${API_BASE}/history/search?q=${encodeURIComponent(q)}`);
+      const j = await r.json();
+      if (seq === sugSeq && current === "me") showSug(j.riders || [], q);
+    } catch (_) { /* leave the list as it is */ }
+  }, 250);
+});
+detailEl.addEventListener("click", e => { const b = e.target.closest("[data-me-air]"); if (b && current === "me") loadMe(b.dataset.meAir); });
+detailEl.addEventListener("submit", e => {
+  if (e.target.id !== "meForm") return; e.preventDefault();
+  const v = document.getElementById("meAir").value.trim(); if (!v) return;
+  const first = document.querySelector("#meSug [data-me-air]");
+  if (/^\d+$/.test(v) || !first) loadMe(v); else loadMe(first.dataset.meAir);   // a number goes straight in; a name takes the top match
+});
 
 // ---------- routing and refresh ----------
 function select() {
