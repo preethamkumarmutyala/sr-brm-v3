@@ -96,7 +96,15 @@ function dateParts(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   return { y, m, d, wd: WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()] };
 }
-const kmLabel = d => (/^\d/.test(d) ? `${d} km` : d);
+// Audax naming: 200 to 1000 km are BRMs (Brevets de Randonneurs Mondiaux); 1200 km and longer are LRMs (Longue Randonnée Mondiale).
+const kmLabel = d => {
+  const n = Number(d);
+  if (!/^\d/.test(String(d))) return d;
+  if (n >= 1200) return `${n} LRM`;
+  if (n >= 200) return `${n} BRM`;
+  return `${d} km`;                                 // 100 and 150 km are shorter rides
+};
+const distChip = d => (d === "1200+" ? "1200+ LRM" : d === "Fleche" ? "Fleche" : kmLabel(d));
 const byDate = (a, b) => a.date.localeCompare(b.date) || String(a.distance).localeCompare(String(b.distance));
 
 const pad2 = n => String(n).padStart(2, "0");
@@ -570,7 +578,7 @@ function renderDashboard() {
 
 // SEASON: every ride of one year, with tap-to-filter summary, month strip and distance chips
 const groupOf = r => ({ done: "done", cancel: "cancel", soon: "soon" }[rideStatus(r).k] || "live");
-const distOf = r => (r.distance === "Fleche" ? "Fleche" : Number(r.distance) >= 1000 ? "1000+" : r.distance);
+const distOf = r => (r.distance === "Fleche" ? "Fleche" : Number(r.distance) >= 1200 ? "1200+" : r.distance);
 const GROUPS = [["all", "All rides"], ["done", "Completed"], ["live", "On now / coming up"], ["soon", "Not opened yet"], ["cancel", "Cancelled"]];
 function renderSeason(year) {
   if (flt.season !== year) flt = { season: year, status: "all", dist: "all", month: "all" };
@@ -582,7 +590,7 @@ function renderSeason(year) {
   const all = rides.filter(r => r.date.startsWith(year));
   const list = all.filter(r => (flt.status === "all" || groupOf(r) === flt.status) && (flt.dist === "all" || distOf(r) === flt.dist) &&
                                (flt.month === "all" || r.date.slice(5, 7) === flt.month));
-  const dists = ["200", "300", "400", "600", "1000+", "Fleche"].filter(d => all.some(r => distOf(r) === d));
+  const dists = ["200", "300", "400", "600", "1000", "1200+", "Fleche"].filter(d => all.some(r => distOf(r) === d));
   const active = flt.status !== "all" || flt.dist !== "all" || flt.month !== "all";
   const chipSt = ([g, t]) => `<button type="button" class="fchip" data-st="${g}" aria-pressed="${flt.status === g}"><b>${g === "all" ? all.length : all.filter(r => groupOf(r) === g).length}</b><span>${t}</span></button>`;
   const months = MON.map((m, i) => { const mm = String(i + 1).padStart(2, "0"), c = all.filter(r => r.date.slice(5, 7) === mm).length;
@@ -593,7 +601,7 @@ function renderSeason(year) {
     <div class="fchips">${GROUPS.map(chipSt).join("")}</div>
     <div class="flabel">Month</div><div class="months">${months}</div>
     ${dists.length > 1 ? `<div class="flabel">Distance</div><div class="dchips">${dists.map(d =>
-      `<button type="button" class="dchip" data-dist="${d}" aria-pressed="${flt.dist === d}">${d === "Fleche" ? "Fleche" : d + " km"}</button>`).join("")}</div>` : ""}
+      `<button type="button" class="dchip" data-dist="${d}" aria-pressed="${flt.dist === d}">${distChip(d)}</button>`).join("")}</div>` : ""}
     ${active ? `<p class="note">Showing ${plural(list.length, "ride", "rides")} of ${all.length}. <button type="button" class="linkbtn" data-clear>Show all rides</button></p>` : ""}
     ${list.length ? monthGroups(list) : `<p class="note">No rides match these choices. <button type="button" class="linkbtn" data-clear>Show all rides</button></p>`}`;
   loadDetails(list.filter(r => r.id).map(r => r.id));
@@ -632,7 +640,7 @@ async function showSR(force) {
   detailEl.innerHTML = loading("Loading riders for all four rides…");
   const res = await loadWeek(force);
   if (current !== "sr") return;
-  if (!srIds()) { detailEl.innerHTML = `<h2>One Week SR riders</h2><p class="note">One Week SR needs a 200, 300, 400 and 600 km ride in the same week, and that isn't the case right now.</p>`; return; }
+  if (!srIds()) { detailEl.innerHTML = `<h2>One Week SR riders</h2><p class="note">One Week SR needs a 200, 300, 400 and 600 BRM in the same week, and that isn't the case right now.</p>`; return; }
   if (res.some(r => r.status === "rejected"))
     return showError("Could not load all four events, so the list would be incomplete. Try again in a minute.", () => showSR(true));
   renderTiles(); renderSR();
@@ -642,7 +650,7 @@ function renderSR() {
   const rows = list.map(r => `<tr><td>${esc(r.air)}</td><td>${esc(r.name)}</td><td>${esc(r.club)}</td>
     ${SR_DISTANCES.map(() => "<td>✅</td>").join("")}</tr>`).join("");
   detailEl.innerHTML = `<h2>One Week SR riders</h2>
-    <p class="note">Riders registered for all four rides (200, 300, 400 and 600 km): <b>${list.length}</b></p>
+    <p class="note">Riders registered for all four rides (200, 300, 400 and 600 BRM): <b>${list.length}</b></p>
     ${table(["AIR no.", "Rider", "Club", ...SR_DISTANCES], rows || `<tr><td colspan="7" class="note">No rider is registered for all four rides yet.</td></tr>`)}`;
   labelCells(detailEl);
 }
@@ -677,13 +685,13 @@ async function ask() {
     const list = srRiders();
     out.innerHTML = list
       ? `<h3>One Week SR riders (${list.length})</h3>` + (list.map(r => `${esc(r.air)} - ${esc(r.name)}`).join("<br>") || "No rider is registered for all four rides yet.")
-      : "One Week SR needs a 200, 300, 400 and 600 km ride in the same week.";
+      : "One Week SR needs a 200, 300, 400 and 600 BRM in the same week.";
     return;
   }
   const m = q.match(/(200|300|400|600|1000|1200)/);
   if (!m) { out.textContent = "Mention a distance such as 200, 300, 400 or 600, or ask about one week sr or the next rides."; return; }
   const d = m[1], ride = wk.find(x => x.distance === d), ev = ride && cache[ride.id];
-  if (!ev) { out.textContent = `There is no ${d} km ride this week (or it could not be loaded). Try "next rides".`; return; }
+  if (!ev) { out.textContent = `There is no ${d} BRM this week (or it could not be loaded). Try "next rides".`; return; }
   const head = `<h3>${esc(ev.title)}</h3>`;
 
   if (q.includes("riders")) out.innerHTML = `${head}Riders: <b>${ev.riderCount}</b><hr>` + ev.riders.map(r => `${esc(r.air)} - ${esc(r.name)}`).join("<br>");
@@ -1061,7 +1069,7 @@ let ind = { picked: [], dist: "all", month: "all", when: "up", q: "" };
 try { ind.picked = JSON.parse(localStorage.getItem("sr-clubs") || "[]").filter(x => typeof x === "string"); } catch (_) {}
 const saveClubs = () => { try { localStorage.setItem("sr-clubs", JSON.stringify(ind.picked)); } catch (_) {} };
 const clubKey = c => `${c.city}|${c.name}`;
-const indiaDist = r => (r.distance === "Fleche" ? "Fleche" : Number(r.distance) >= 1000 ? "1000+" : r.distance);
+const indiaDist = r => (r.distance === "Fleche" ? "Fleche" : Number(r.distance) >= 1200 ? "1200+" : r.distance);
 const dayLabel = iso => new Date(iso + "T00:00:00Z").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
 // club logos: the Worker reads them from each club's Audax page; no logo = initials badge
 let clubLogos = null;
@@ -1104,12 +1112,12 @@ async function renderIndia() {
     (ind.dist === "all" || indiaDist(r) === ind.dist) && (ind.month === "all" || r.date.slice(5, 7) === ind.month));
   list.sort((a, b) => (ind.when === "past" ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)) || a.club.city.localeCompare(b.club.city));
   const total = list.length, cap = 150;
-  const dists = ["100", "150", "200", "300", "400", "600", "1000+", "Fleche"];
+  const dists = ["100", "150", "200", "300", "400", "600", "1000", "1200+", "Fleche"];
   const row = r => {
     const mine = r.club.home, href = r.id ? `#e${r.id}` : "";
     const status = r.id ? (r.date < today ? "Completed" : "Registration page") : (r.date < today ? "Cancelled" : "Registration not opened");
     const inner = `<span class="irow-date">${esc(dayLabel(r.date))}<small>${esc(r.year)}</small></span>
-      <span class="irow-main"><b>${esc(r.distance === "Fleche" ? "Fleche" : r.distance + " km")}</b> · ${esc(r.club.city)}<small>${esc(r.club.name)}</small></span>
+      <span class="irow-main"><b>${esc(kmLabel(r.distance))}</b> · ${esc(r.club.city)}<small>${esc(r.club.name)}</small></span>
       <span class="irow-st${r.id ? "" : " dim"}">${esc(status)}</span>`;
     return href ? `<a class="irow" href="${href}" data-open-club="${esc(clubKey(r.club))}">${inner}</a>` : `<div class="irow">${inner}</div>`;
   };
@@ -1122,7 +1130,7 @@ async function renderIndia() {
     <div class="flabel">When</div>
     <div class="dchips">${[["up", "Upcoming"], ["past", "Earlier"], ["all", "All"]].map(([k, t]) => `<button type="button" class="dchip" data-ind-when="${k}" aria-pressed="${ind.when === k}">${t}</button>`).join("")}</div>
     <div class="flabel">Distance</div>
-    <div class="dchips">${dists.map(d => `<button type="button" class="dchip" data-ind-dist="${d}" aria-pressed="${ind.dist === d}">${d === "Fleche" ? "Fleche" : d + " km"}</button>`).join("")}</div>
+    <div class="dchips">${dists.map(d => `<button type="button" class="dchip" data-ind-dist="${d}" aria-pressed="${ind.dist === d}">${distChip(d)}</button>`).join("")}</div>
     <div class="flabel">Month</div>
     <div class="months">${MON.map((m, i) => { const mm = String(i + 1).padStart(2, "0"); return `<button type="button" class="mchip" data-ind-month="${mm}" aria-pressed="${ind.month === mm}">${m}</button>`; }).join("")}</div>
     <p class="note"><b>${plural(total, "ride", "rides")}</b>${total > cap ? ` (showing the first ${cap}; pick a club, distance or month to narrow it)` : ""}</p>
@@ -1186,11 +1194,11 @@ function renderMe() {
     body = `<h3>${esc(d.name || "Rider")} <span class="chip">AIR ${esc(d.air)}</span></h3>
       <div class="stats">${tile(d.finished, "Rides finished")}${tile(d.km.toLocaleString("en-IN"), "Km finished")}${tile(d.superRandonneur, "Super Randonneur" + (d.superRandonneur === 1 ? "" : "s"))}${tile(d.medals, "Medals")}</div>
       <div class="flabel">Finished by distance</div>
-      <div class="stats">${dists.filter(x => d.byDistance[x]).map(x => tile(d.byDistance[x], x === "Fleche" ? "Fleche" : x + " km")).join("") || `<p class="note">No finished rides yet.</p>`}</div>
+      <div class="stats">${Object.keys(d.byDistance).sort((a, b) => (Number(a) || 1e6) - (Number(b) || 1e6)).map(x => tile(d.byDistance[x], kmLabel(x))).join("") || `<p class="note">No finished rides yet.</p>`}</div>
       <div class="flabel">Season by season</div>
       <div class="seasonrows">${d.seasons.map(x => `<div class="srow"><b>${esc(x.year)}</b><span>${["200", "300", "400", "600"].map(k => `<span class="dot ${x.distances.includes(k) ? "on" : ""}">${k}</span>`).join("")}</span>${x.sr ? `<span class="chip">Super Randonneur</span>` : ""}</div>`).join("") || `<p class="note">No finished seasons yet.</p>`}</div>
       <div class="flabel">All rides entered (${d.ridden}). Only finished rides count towards the totals above</div>
-      <div class="ilist">${d.rides.map(r => `<a class="irow" href="#e${esc(r.id)}"><span class="irow-date">${esc(dayLabel(r.date))}<small>${esc(r.date.slice(0, 4))}</small></span><span class="irow-main"><b>${esc(r.distance === "Fleche" ? "Fleche" : r.distance + " km")}</b>${r.organiser ? ` <span class="orgline">${logoHtml(r.organiser.split(" · ").pop(), "sm")} ${esc(r.organiser.split(" · ").pop())}</span>` : ""}<small>${r.organiser ? "Organised by " + esc(r.organiser) + (r.club ? " · rode for " + esc(r.club) : "") : esc(r.club)}</small></span><span class="irow-st${r.finished ? "" : " dim"}">${esc(r.finished ? r.result : r.pending ? "Result pending" : (r.result || "Registered"))}</span></a>`).join("")}</div>
+      <div class="ilist">${d.rides.map(r => `<a class="irow" href="#e${esc(r.id)}"><span class="irow-date">${esc(dayLabel(r.date))}<small>${esc(r.date.slice(0, 4))}</small></span><span class="irow-main"><b>${esc(kmLabel(r.distance))}</b>${r.organiser ? ` <span class="orgline">${logoHtml(r.organiser.split(" · ").pop(), "sm")} ${esc(r.organiser.split(" · ").pop())}</span>` : ""}<small>${r.organiser ? "Organised by " + esc(r.organiser) + (r.club ? " · rode for " + esc(r.club) : "") : esc(r.club)}</small></span><span class="irow-st${r.finished ? "" : " dim"}">${esc(r.finished ? r.result : r.pending ? "Result pending" : (r.result || "Registered"))}</span></a>`).join("")}</div>
       <p class="note">From public Audax ride pages, read since ${esc(d.coverage?.since || "…")}${d.coverage?.stillToRead ? `; ${plural(d.coverage.stillToRead, "page", "pages")} still being read, so older rides may be missing` : ""}. Audax's own records are the official ones.</p>`;
   }
   detailEl.innerHTML = `<h2>My rides</h2><p class="note">Type a name or an AIR number to see a rider’s history: rides done, distances, Super Randonneur years and medals. No password is needed because this comes from public ride results.</p>${form}${body}`;
