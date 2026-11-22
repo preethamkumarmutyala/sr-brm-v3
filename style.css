@@ -335,3 +335,8 @@ a.irow:hover { border-color: var(--brand); }
 
 .links a.clubslink { background: #fff; color: var(--brand); font-weight: 700; }
 .links a.clubslink:hover { background: #fff; filter: brightness(.95); }
+.clubbar { display: flex; flex-wrap: wrap; gap: .4rem .9rem; align-items: center; justify-content: space-between; margin: .6rem auto 0; padding: .5rem .9rem; max-width: var(--maxw, 72rem); background: #fff3e0; border: 1px solid #ffcc80; color: #4e2a00; border-radius: 12px; font-size: .9rem; }
+.clubbar .linkbtn { color: var(--brand); }
+.clubrow { display: flex; align-items: center; gap: .4rem; }
+.clubrow .clubopt { flex: 1; min-width: 0; }
+.openclub { flex: none; background: var(--brand); color: #fff; border: 0; border-radius: 999px; padding: .3rem .9rem; font: inherit; font-size: .85rem; font-weight: 600; cursor: pointer; }

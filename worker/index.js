@@ -327,7 +327,7 @@ async function scrapeAllClubs() {
   const homeYear = Number((home.match(/Calendar for (\d{4})/i) || [])[1]) || new Date().getUTCFullYear();
   const pages = [];
   if (home) pages.push([homeYear, home]);
-  for (const y of [homeYear + 1]) {
+  for (const y of [homeYear - 1, homeYear + 1]) {
     const link = findYearLink(home, y);
     try { pages.push([y, await fetchText(link ? new URL(link, `${SOURCE}/`).href : `${SOURCE}/events-ec-${y}`)]); } catch (err) { errors.push(`${y}: ${err.message}`); }
   }
@@ -344,7 +344,7 @@ async function scrapeAllClubs() {
     rides: rides.sort((a, b) => a.date.localeCompare(b.date) || a.distance.localeCompare(b.distance))
   })).sort((a, b) => a.city.localeCompare(b.city) || a.name.localeCompare(b.name));
   if (!clubs.length) errors.push("no clubs found on the Audax calendar");
-  return { years: [homeYear, homeYear + 1], clubCount: clubs.length, clubs, errors, fetchedAt: new Date().toISOString() };
+  return { years: [homeYear - 1, homeYear, homeYear + 1], clubCount: clubs.length, clubs, errors, fetchedAt: new Date().toISOString() };
 }
 
 // Returns cached data when fresh, otherwise produces it and caches it.
@@ -363,7 +363,7 @@ async function cached(key, ttl, ctx, produce) {
 }
 const getEvent = (id, ctx) => cached(`ev2/${id}`, d => (d.date && d.date < daysAgoISO(2) ? 21600 : CACHE_TTL), ctx, () => scrapeEvent(id));
 const getRoute = (id, ctx) => cached(`route-v4/${id}`, ROUTE_TTL, ctx, () => scrapeRoute(id, ctx));
-const getAllClubs = ctx => cached("allclubs-v2", d => (d.errors.length ? 120 : CALENDAR_TTL), ctx, () => scrapeAllClubs());
+const getAllClubs = ctx => cached("allclubs-v3", d => (d.errors.length ? 120 : CALENDAR_TTL), ctx, () => scrapeAllClubs());
 const getCalendar = ctx => cached("calendar-v1", d => (d.errors.length ? 120 : CALENDAR_TTL), ctx, () => scrapeCalendar());
 
 // ---------- team area, control times and tracking ----------

@@ -29,6 +29,9 @@ const tilesEl = document.getElementById("tiles");
 const detailEl = document.getElementById("detail");
 const cache = {}, routeCache = {}, failed = new Set(), queued = new Set();
 let rides = [], calendarNote = "";
+// club = null means our own club (Secunderabad Randonneurs). Otherwise another Audax club is being viewed in the same screens.
+let club = null, clubWanted = "";
+try { clubWanted = sessionStorage.getItem("sr-club") || ""; } catch (_) {}
 let current = null, origin = null, query = "", filter = "all";   // origin = the list you came from (for the back button)
 let flt = { season: "", status: "all", dist: "all", month: "all" };   // filters on a season page
 const secOpen = { riders: true, controls: false, cue: false };   // which sections of a ride page are open
@@ -104,7 +107,7 @@ function rideWindow(r) {                  // start and end (ms, Indian time): ri
 // No Audax page: past (or marked in CANCELLED) = cancelled, future = registration not opened yet.
 // With a page: before the start = open/closed, during the time limit = ongoing, afterwards = completed.
 function rideStatus(r) {
-  if (!r.id) return (r.date < todayIST() || CANCELLED.includes(r.date)) ? { k: "cancel", t: "Event cancelled" } : { k: "soon", t: "Registration not opened" };
+  if (!r.id) return (r.date < todayIST() || (!club && CANCELLED.includes(r.date))) ? { k: "cancel", t: "Event cancelled" } : { k: "soon", t: "Registration not opened" };
   const [start, end] = rideWindow(r), now = Date.now();
   if (now >= end) return { k: "done", t: "Completed" };
   if (now >= start) return { k: "ongoing", t: "Ongoing" };
@@ -161,6 +164,13 @@ async function fetchRoute(id, force) {   // controls + cue sheet from the Audax 
 }
 async function loadCalendar() {
   try {
+    if (clubWanted) {
+      await ensureIndia(true);
+      const c = india && india.clubs.find(x => clubKey(x) === clubWanted && !x.home);
+      if (c) { club = { key: clubWanted, city: c.city, name: c.name }; rides = c.rides.slice().sort(byDate); calendarNote = (india.errors || []).join("; "); return; }
+      clubWanted = ""; club = null;                                   // club not found: go back to our own
+      try { sessionStorage.removeItem("sr-club"); } catch (_) {}
+    }
     const r = await fetch(`${API_BASE}/calendar`);
     const j = await r.json();
     if (!r.ok || j.error) throw new Error(j.error || "Server returned " + r.status);
@@ -206,6 +216,7 @@ async function api(path, body) {          // talks to the Worker; sends the team
 }
 const crossCache = {}, markCache = {}, progressCache = {};
 async function fetchCrossings(id, force) {
+  if (club) { crossCache[id] = []; markCache[id] = []; progressCache[id] = []; return crossCache[id]; }   // control times are kept for our own club only
   if (!force && crossCache[id]) return crossCache[id];
   try { const j = await api(`/crossings/${id}`); crossCache[id] = j.crossings || []; markCache[id] = j.marks || []; progressCache[id] = j.progress || []; } catch (_) { crossCache[id] = crossCache[id] || []; }
   return crossCache[id];
@@ -262,6 +273,7 @@ const ICONS = {
 };
 const icon = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg>`;
 function renderTiles() {
+  renderClubBar();
   const today = todayIST(), f = dateParts(today), cy = thisYear(), on = lit();
   const years = [...new Set(rides.map(r => Number(r.date.slice(0, 4))))].sort((a, b) => a - b);
   const past = years.filter(y => y < cy);
@@ -276,6 +288,23 @@ function renderTiles() {
     `</div><div class="subnav">${srIds() ? tool("sr", "One Week SR") : ""}${tool("assistant", "BRM Assistant")}</div>`;
 }
 tilesEl.addEventListener("click", e => { const b = e.target.closest("[data-d]"); if (b) location.hash = b.dataset.d; });
+const clubbarEl = document.createElement("div");
+clubbarEl.id = "clubbar";
+tilesEl.parentNode.insertBefore(clubbarEl, tilesEl);
+function renderClubBar() {
+  clubbarEl.innerHTML = club ? `<div class="clubbar"><span>Viewing <b>${esc(club.city)} · ${esc(club.name)}</b></span><button type="button" class="linkbtn" data-home>Back to Secunderabad Randonneurs</button></div>` : "";
+}
+clubbarEl.addEventListener("click", e => { if (e.target.closest("[data-home]")) setClub(null, "dashboard"); });
+async function setClub(key, target) {             // switch every screen to another club (or back to ours with null)
+  clubWanted = key || ""; club = null;
+  try { key ? sessionStorage.setItem("sr-club", key) : sessionStorage.removeItem("sr-club"); } catch (_) {}
+  rides = []; origin = null; flt = { season: "", status: "all", dist: "all", month: "all" };
+  detailEl.innerHTML = loading("Loading rides…");
+  await loadCalendar();
+  if (target) history.replaceState(null, "", "#" + target);
+  select();
+  loadWeek().then(renderTiles);
+}
 
 // ---------- event view ----------
 // copy each column heading onto its cells so tables can turn into stacked cards on phones
@@ -294,6 +323,10 @@ const table = (heads, rows) => `<div class="scroll"><table><thead><tr>${heads.ma
 const km2 = v => (v !== "" && v != null && isFinite(+v)) ? (+v).toFixed(2) : (v ?? "");   // 89.7 -> 89.70, like the official sheet
 
 function startMap(ev) {                  // the usual start has an exact pin; other starts are searched by name
+  if (club) {                            // another club: search the start place near that club's city
+    const q = encodeURIComponent([ev.startLocation, club.city].filter(Boolean).join(", "));
+    return { link: `https://www.google.com/maps/search/?api=1&query=${q}`, embed: `https://www.google.com/maps?q=${q}&output=embed` };
+  }
   if (!ev.startLocation || /kendriya/i.test(ev.startLocation)) return { link: MAPS, embed: MAP_EMBED };
   const q = encodeURIComponent(ev.startLocation + ", Secunderabad");
   return { link: `https://www.google.com/maps/search/?api=1&query=${q}`, embed: `https://www.google.com/maps?q=${q}&output=embed` };
@@ -387,7 +420,7 @@ function renderDetail() {
       <div class="scroll"><table>
         <thead><tr><th>#</th><th>Rider</th><th>AIR no.</th><th>Club</th><th>Fee paid</th><th>Medal</th><th>Result</th><th>Status</th></tr></thead>
         <tbody id="rows"></tbody></table></div>`)}
-    ${cr.length || progressCache[current]?.length || status.k === "ongoing" ? sec("live", "Live control board", new Set([...cr.map(x => x.air), ...(progressCache[current] || []).map(x => x.air)]).size || null, boardHtml(ev, route, cr, ev.date || ride.date, progressCache[current] || []), secOpen.live ?? status.k === "ongoing") : ""}
+    ${!club && (cr.length || progressCache[current]?.length || status.k === "ongoing") ? sec("live", "Live control board", new Set([...cr.map(x => x.air), ...(progressCache[current] || []).map(x => x.air)]).size || null, boardHtml(ev, route, cr, ev.date || ride.date, progressCache[current] || []), secOpen.live ?? status.k === "ongoing") : ""}
     ${controls ? sec("controls", "Controls (check-points)", ctl.length, table(controlHeads, controls)) : ""}
     ${cues ? sec("cue", "Cue sheet (turn by turn)", cue.length, table(cueHeads, cues)) : (route === null ? '<p class="note">Controls and cue sheet are not on Audax yet.</p>' : "")}`;
 
@@ -998,7 +1031,7 @@ detailEl.addEventListener("keydown", e => {                              // Ente
 });
 
 // ---------- All India: rides from every Audax club ----------
-// Read-only list from the Worker's /all. Other clubs' rides open on Audax; only our own club has full pages here.
+// Rides of every Audax club from the Worker's /all. "Open" on a club switches Now / seasons / ride pages to that club.
 let india = null, indiaErr = "";
 let ind = { picked: [], dist: "all", month: "all", when: "up", q: "" };
 try { ind.picked = JSON.parse(localStorage.getItem("sr-clubs") || "[]").filter(x => typeof x === "string"); } catch (_) {}
@@ -1006,14 +1039,19 @@ const saveClubs = () => { try { localStorage.setItem("sr-clubs", JSON.stringify(
 const clubKey = c => `${c.city}|${c.name}`;
 const indiaDist = r => (r.distance === "Fleche" ? "Fleche" : Number(r.distance) >= 1000 ? "1000+" : r.distance);
 const dayLabel = iso => new Date(iso + "T00:00:00Z").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+async function ensureIndia(force) {
+  if (india && !force) return india;
+  try {
+    const r = await fetch(`${API_BASE}/all`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    india = await r.json(); indiaErr = "";
+  } catch (err) { if (!india) indiaErr = "Could not load the all-club list right now. Please try again in a few minutes."; }
+  return india;
+}
 async function renderIndia() {
   if (!india && !indiaErr) {
-    detailEl.innerHTML = `<h2>All India rides</h2><p class="note">Loading rides from every club…</p>`;
-    try {
-      const r = await fetch(`${API_BASE}/all`);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      india = await r.json();
-    } catch (err) { indiaErr = "Could not load the all-club list right now. Please try again in a few minutes."; }
+    detailEl.innerHTML = `<h2>Clubs</h2><p class="note">Loading rides from every club…</p>`;
+    await ensureIndia();
     if (current !== "india") return;
   }
   if (indiaErr) { detailEl.innerHTML = `<h2>All India rides</h2><p class="note error">${esc(indiaErr)} <button type="button" class="linkbtn" data-ind-retry>Try again</button></p>`; return; }
@@ -1029,19 +1067,19 @@ async function renderIndia() {
   const total = list.length, cap = 150;
   const dists = ["100", "150", "200", "300", "400", "600", "1000+", "Fleche"];
   const row = r => {
-    const mine = r.club.home, href = r.id ? (mine ? `#e${r.id}` : `${AUDAX}/event-e-${r.id}`) : "";
-    const status = r.id ? (r.date < today ? "Completed" : "Registration page") : (r.date < today ? "No Audax page" : "Registration not opened");
+    const mine = r.club.home, href = r.id ? `#e${r.id}` : "";
+    const status = r.id ? (r.date < today ? "Completed" : "Registration page") : (r.date < today ? "Cancelled" : "Registration not opened");
     const inner = `<span class="irow-date">${esc(dayLabel(r.date))}<small>${esc(r.year)}</small></span>
       <span class="irow-main"><b>${esc(r.distance === "Fleche" ? "Fleche" : r.distance + " km")}</b> · ${esc(r.club.city)}<small>${esc(r.club.name)}${mine ? " · our club" : ""}</small></span>
       <span class="irow-st${r.id ? "" : " dim"}">${esc(status)}</span>`;
-    return href ? `<a class="irow" href="${href}"${mine ? "" : ` target="_blank" rel="noopener"`}>${inner}</a>` : `<div class="irow">${inner}</div>`;
+    return href ? `<a class="irow" href="${href}" data-open-club="${mine ? "" : esc(clubKey(r.club))}">${inner}</a>` : `<div class="irow">${inner}</div>`;
   };
   detailEl.innerHTML = `<h2>Clubs &amp; rides across India</h2>
-    <p class="note">Search a club, tick the ones you want to follow, or leave it empty to see everyone. Other clubs' rides open on the Audax website, where registration is done.</p>
+    <p class="note">Search a club, tick the ones you want to follow, or leave it empty to see everyone. Tap <b>Open</b> to see a club exactly like ours: Now, seasons, registration and riders. Registration itself is always done on Audax.</p>
     <div class="flabel">Clubs ${sel.size ? `(${sel.size} picked)` : ""}</div>
     ${sel.size ? `<div class="picked">${clubs.filter(c => sel.has(clubKey(c))).map(c => `<button type="button" class="pickchip" data-ind-club="${esc(clubKey(c))}">${esc(c.city)} · ${esc(c.name)} ✕</button>`).join("")} <button type="button" class="linkbtn" data-ind-clear>Clear clubs</button></div>` : ""}
     <input type="search" id="indSearch" class="isearch" placeholder="Search a city or club" value="${esc(ind.q)}" autocomplete="off" aria-label="Search clubs">
-    <div class="clubbox">${shown.map(c => `<label class="clubopt"><input type="checkbox" data-ind-club="${esc(clubKey(c))}" ${sel.has(clubKey(c)) ? "checked" : ""}><span><b>${esc(c.city)}</b> ${esc(c.name)}</span><small>${c.rides.length}</small></label>`).join("") || `<p class="note">No club matches.</p>`}</div>
+    <div class="clubbox">${shown.map(c => `<div class="clubrow"><label class="clubopt"><input type="checkbox" data-ind-club="${esc(clubKey(c))}" ${sel.has(clubKey(c)) ? "checked" : ""}><span><b>${esc(c.city)}</b> ${esc(c.name)}</span><small>${c.rides.length}</small></label><button type="button" class="openclub" data-ind-open="${esc(c.home ? "" : clubKey(c))}">Open</button></div>`).join("") || `<p class="note">No club matches.</p>`}</div>
     <div class="flabel">When</div>
     <div class="dchips">${[["up", "Upcoming"], ["past", "Earlier"], ["all", "All"]].map(([k, t]) => `<button type="button" class="dchip" data-ind-when="${k}" aria-pressed="${ind.when === k}">${t}</button>`).join("")}</div>
     <div class="flabel">Distance</div>
@@ -1054,6 +1092,10 @@ async function renderIndia() {
 }
 detailEl.addEventListener("click", e => {
   if (current !== "india") return;
+  const open = e.target.closest("[data-ind-open]");
+  if (open) { setClub(open.dataset.indOpen || null, "dashboard"); return; }
+  const ride = e.target.closest("a[data-open-club]");
+  if (ride) { e.preventDefault(); setClub(ride.dataset.openClub || null, ride.getAttribute("href").slice(1)); return; }
   const t = e.target.closest("[data-ind-club],[data-ind-clear],[data-ind-when],[data-ind-dist],[data-ind-month],[data-ind-retry]");
   if (!t || t.matches("input")) return;
   const flip = (k, v) => { ind[k] = ind[k] === v ? "all" : v; };
@@ -1079,6 +1121,7 @@ detailEl.addEventListener("input", e => {
 
 // ---------- routing and refresh ----------
 function select() {
+  if (location.hash.slice(1).split("?", 1)[0] === "team" && club) { setClub(null); return; }   // the team desk is for our own club only
   const [h] = location.hash.slice(1).split("?", 1), wk = weekRides();
   const byDistance = /^(200|300|400|600)$/.test(h) ? wk.find(r => r.distance === h) : null;   // old links like #600
   if (/^e\d+$/.test(h)) current = h.slice(1);
