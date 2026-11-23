@@ -12,6 +12,7 @@ GMAIL_USER = "preethamkumar@gmail.com"
 BOOTSTRAP_ADMIN_EMAIL = "preethamkumar@gmail.com"
 STAGING_MODE = "true"
 HISTORY_SCAN = "true"          # staging only: read public ride results into the staging database
+HISTORY_DAILY_WRITES = "40000"   # the free D1 plan allows 100,000 row writes a day for the whole account, so keep well under it
 
 [triggers]
 crons = ["* * * * *"]

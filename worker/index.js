@@ -861,13 +861,18 @@ async function runHistoryScan(env, ctx) {
     const put = (k, v) => d.prepare("INSERT INTO hist_meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(k, v);
     await d.batch([put("cov_done", c.done), put("cov_todo", c.todo), put("cov_since", Number((c.since || "").replace(/-/g, "")) || 0), put("cov_at", now)]);
   }
-  const recent = daysAgoISO(3);
+  // D1's free plan allows 100,000 row writes a day for the whole Cloudflare account (the live site included), so reading history keeps to a daily budget
+  const dayKey = `w_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`, budget = Number(env.HISTORY_DAILY_WRITES) || 40000;
+  let used = (await d.prepare("SELECT v FROM hist_meta WHERE k=?").bind(dayKey).first())?.v || 0;
+  if (used >= budget) return;
+  const usedAtStart = used, recent = daysAgoISO(3);
   let results = (await d.prepare("SELECT event_id, date, distance, club FROM hist_events WHERE state = 'todo' ORDER BY date DESC LIMIT ?").bind(HISTORY_BATCH).all()).results;
   if (results.length < HISTORY_BATCH) {                               // nothing new to read: refresh rides from the last few days (results arrive late)
     const more = (await d.prepare("SELECT event_id, date, distance, club FROM hist_events WHERE state = 'done' AND date >= ? AND scanned < ? ORDER BY date DESC LIMIT ?").bind(recent, now - 6 * 3600e3, HISTORY_BATCH - results.length).all()).results;
     results = results.concat(more);
   }
   for (const e of results) {
+    if (used >= budget) break;
     try {
       const ev = await scrapeEvent(e.event_id);
       const stmts = [d.prepare("DELETE FROM hist_results WHERE event_id = ?").bind(e.event_id)];
@@ -883,10 +888,12 @@ async function runHistoryScan(env, ctx) {
       }
       stmts.push(d.prepare("UPDATE hist_events SET state = 'done', riders = ?, scanned = ? WHERE event_id = ?").bind(ev.riders.length, Date.now(), e.event_id));
       for (let i = 0; i < stmts.length; i += 80) await d.batch(stmts.slice(i, i + 80));
+      used += stmts.length * 3 + 4;                                  // a result row costs about four writes with its indexes
     } catch (err) {
       await d.prepare("UPDATE hist_events SET tries = tries + 1, state = CASE WHEN tries + 1 >= 3 THEN 'skip' ELSE state END, scanned = ? WHERE event_id = ?").bind(Date.now(), e.event_id).run();
     }
   }
+  if (used !== usedAtStart) await d.prepare("INSERT INTO hist_meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(dayKey, used).run();
 }
 async function handleHistory(request, env, air, ctx) {
   const d = await historyDb(env);
@@ -896,7 +903,7 @@ async function handleHistory(request, env, air, ctx) {
     const t = await d.prepare("SELECT count(*) n, count(DISTINCT air) riders FROM hist_results").first();
     const bf = (await d.prepare("SELECT k, v FROM hist_meta WHERE k LIKE 'backfill_%' AND k NOT IN ('backfill_next','backfill_tries') ORDER BY k DESC").all()).results;
     const next = (await d.prepare("SELECT v FROM hist_meta WHERE k='backfill_next'").first())?.v;
-    return json(request, { events: s.results, results: t.n, riders: t.riders, olderSeasons: { nextYear: next ?? null, done: next !== undefined && next < HISTORY_MIN_YEAR, ridesFoundByYear: Object.fromEntries(bf.map(x => [x.k.slice(9), x.v])) } }, 200, { "Cache-Control": "no-store" });
+    return json(request, { events: s.results, results: t.n, riders: t.riders, writesToday: (await d.prepare("SELECT v FROM hist_meta WHERE k=?").bind(`w_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`).first())?.v || 0, dailyBudget: Number(env.HISTORY_DAILY_WRITES) || 40000, olderSeasons: { nextYear: next ?? null, done: next !== undefined && next < HISTORY_MIN_YEAR, ridesFoundByYear: Object.fromEntries(bf.map(x => [x.k.slice(9), x.v])) } }, 200, { "Cache-Control": "no-store" });
   }
   if (air === "search") {                                           // type part of a name or AIR number, get a short list of riders
     const q = (new URL(request.url).searchParams.get("q") || "").trim().replace(/[%_\\]/g, "").slice(0, 40);
