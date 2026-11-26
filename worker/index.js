@@ -867,6 +867,10 @@ async function runHistoryScan(env, ctx) {
   if (used >= budget) return;
   const usedAtStart = used, recent = daysAgoISO(3);
   let results = (await d.prepare("SELECT event_id, date, distance, club FROM hist_events WHERE state = 'todo' ORDER BY date DESC LIMIT ?").bind(HISTORY_BATCH).all()).results;
+  if (results.length < HISTORY_BATCH) {                               // rides that came back empty are looked at again once a day
+    const again = (await d.prepare("SELECT event_id, date, distance, club FROM hist_events WHERE state = 'retry' AND scanned < ? ORDER BY date DESC LIMIT ?").bind(now - 20 * 3600e3, HISTORY_BATCH - results.length).all()).results;
+    results = results.concat(again);
+  }
   if (results.length < HISTORY_BATCH) {                               // nothing new to read: refresh rides from the last few days (results arrive late)
     const more = (await d.prepare("SELECT event_id, date, distance, club FROM hist_events WHERE state = 'done' AND date >= ? AND scanned < ? ORDER BY date DESC LIMIT ?").bind(recent, now - 6 * 3600e3, HISTORY_BATCH - results.length).all()).results;
     results = results.concat(more);
@@ -886,7 +890,9 @@ async function runHistoryScan(env, ctx) {
         if (air) stmts.push(d.prepare("INSERT INTO hist_riders (air, name, rides, last, club) VALUES (?, ?, (SELECT count(*) FROM hist_results WHERE air = ?), (SELECT max(date) FROM hist_results WHERE air = ?), ?) ON CONFLICT(air) DO UPDATE SET name = excluded.name, rides = excluded.rides, last = excluded.last, club = excluded.club")
           .bind(air, r.name, air, air, r.club || e.club));
       }
-      stmts.push(d.prepare("UPDATE hist_events SET state = 'done', riders = ?, scanned = ? WHERE event_id = ?").bind(ev.riders.length, Date.now(), e.event_id));
+      const noRiders = ev.riders.length === 0 && e.date < daysAgoISO(2);          // a finished ride should have riders: re-check it on later days before believing it is empty
+      stmts.push(d.prepare(noRiders ? "UPDATE hist_events SET state = CASE WHEN tries + 1 >= 3 THEN 'empty' ELSE 'retry' END, tries = tries + 1, riders = 0, scanned = ? WHERE event_id = ?" : "UPDATE hist_events SET state = 'done', riders = ?, scanned = ? WHERE event_id = ?")
+        .bind(...(noRiders ? [Date.now(), e.event_id] : [ev.riders.length, Date.now(), e.event_id])));
       for (let i = 0; i < stmts.length; i += 80) await d.batch(stmts.slice(i, i + 80));
       used += stmts.length * 3 + 4;                                  // a result row costs about four writes with its indexes
     } catch (err) {
@@ -894,6 +900,20 @@ async function runHistoryScan(env, ctx) {
     }
   }
   if (used !== usedAtStart) await d.prepare("INSERT INTO hist_meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(dayKey, used).run();
+}
+// Staging helper: shows how one Audax event page is laid out and what the reader makes of it, to find pages it reads wrongly
+async function handleProbe(request, id) {
+  if (!/^\d{3,6}$/.test(id)) return json(request, { error: "Use /history/probe/<event id>" }, 400);
+  const html = await fetchText(`${SOURCE}/event-e-${id}`);
+  const ev = await scrapeEvent(id);
+  const tables = [...html.matchAll(/<table[^>]*>([\s\S]*?)<\/table>/gi)].map(t => {
+    const rows = [...t[1].matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].map(r => [...r[1].matchAll(/<t([dh])[^>]*>([\s\S]*?)<\/t[dh]>/gi)].map(c => `${c[1]}:${clean(c[2]).slice(0, 40)}`));
+    return { rows: rows.length, columnsInFirstRows: rows.slice(0, 3).map(r => r.length), sample: rows.slice(0, 4) };
+  });
+  const text = clean(html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " "));
+  return json(request, { id, htmlLength: html.length, title: ev.title, date: ev.date, distance: ev.distance, ridersRead: ev.riders.length, tables,
+    mentions: { riders: /rider/i.test(text), result: /result/i.test(text), cancelled: /cancel/i.test(text), noRecords: /no (record|rider|data)/i.test(text) },
+    pageTextSample: text.slice(0, 700) }, 200, { "Cache-Control": "no-store" });
 }
 async function handleHistory(request, env, air, ctx) {
   const d = await historyDb(env);
@@ -1018,6 +1038,7 @@ export default {
       if (a === "team") return await handleTeam(request, env, b, c, ctx);
       if (a === "crossings" && /^\d{3,6}$/.test(b || "")) return await handleCrossings(request, env, b);
       if (request.method !== "GET") return json(request, { error: "Method not allowed" }, 405);
+      if (a === "history" && b === "probe" && c && env.HISTORY_SCAN === "true") return await handleProbe(request, c);
       if (a === "history" && env.HISTORY_SCAN === "true" && b) return await handleHistory(request, env, b, ctx);
       if (a === "clubs" && b === "logos" && env.HISTORY_SCAN === "true") return await handleClubLogos(request, env);
       if (a === "logo" && env.HISTORY_SCAN === "true") return await handleLogo(request, env, b);
