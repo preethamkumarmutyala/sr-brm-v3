@@ -1219,7 +1219,7 @@ async function loadMe(air) {
 }
 function renderMe() {
   const d = meData, dists = ["200", "300", "400", "600", "1000", "1200", "Fleche"];
-  const form = `<form id="meForm" class="meform"><input type="text" inputmode="numeric" id="meAir" class="isearch" placeholder="Type a name or AIR number" value="${esc(meAir)}" autocomplete="off" aria-label="Name or AIR number"><button class="btn" type="submit">Show rides</button></form><div id="meSug" class="sugbox"></div>`;
+  const form = `<form id="meForm" class="meform"><input type="search" inputmode="search" enterkeyhint="search" autocapitalize="words" id="meAir" class="isearch" placeholder="Type a name or AIR number" value="${esc(meAir)}" autocomplete="off" aria-label="Name or AIR number"><button class="btn" type="submit">Show rides</button></form><div id="meSug" class="sugbox"></div>`;
   let body = "";
   if (meBusy) body = `<p class="note">Looking up rides…</p>`;
   else if (meErr) body = `<p class="note error">${esc(meErr)}</p>`;
