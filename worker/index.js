@@ -913,6 +913,9 @@ async function handleProbe(request, id) {
   const text = clean(html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " "));
   return json(request, { id, htmlLength: html.length, title: ev.title, date: ev.date, distance: ev.distance, ridersRead: ev.riders.length, tables,
     mentions: { riders: /rider/i.test(text), result: /result/i.test(text), cancelled: /cancel/i.test(text), noRecords: /no (record|rider|data)/i.test(text) },
+    scripts: [...html.matchAll(/<script[^>]*\ssrc=["']([^"']+)["']/gi)].map(m => m[1]).slice(0, 15),
+    ajaxHints: [...html.matchAll(/(\$\.(?:ajax|post|get|getJSON)\([^)]{0,220}\)|fetch\([^)]{0,160}\)|XMLHttpRequest[^;]{0,120}|["'][\w/.-]*\.php[^"']{0,60}["'])/gi)].map(m => m[1].replace(/\s+/g, " ").slice(0, 240)).slice(0, 25),
+    fellowRidersHtml: (() => { const i = html.search(/Fellow Riders/i); const j = html.search(/<table/i); return { atFellowRiders: i < 0 ? null : html.slice(i, i + 500).replace(/\s+/g, " "), atTable: j < 0 ? null : html.slice(Math.max(0, j - 400), j + 700).replace(/\s+/g, " ") }; })(),
     pageTextSample: text.slice(0, 700) }, 200, { "Cache-Control": "no-store" });
 }
 async function handleHistory(request, env, air, ctx) {
