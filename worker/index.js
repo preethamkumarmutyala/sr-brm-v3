@@ -918,6 +918,14 @@ async function handleProbe(request, id) {
     fellowRidersHtml: (() => { const i = html.search(/Fellow Riders/i); const j = html.search(/<table/i); return { atFellowRiders: i < 0 ? null : html.slice(i, i + 500).replace(/\s+/g, " "), atTable: j < 0 ? null : html.slice(Math.max(0, j - 400), j + 700).replace(/\s+/g, " ") }; })(),
     pageTextSample: text.slice(0, 700) }, 200, { "Cache-Control": "no-store" });
 }
+// Audax counts Super Randonneurs per season: before 2025 the "ACP year" runs 1 Nov to 31 Oct (named like 2022-2023); from 2025 it is the calendar year
+const seasonOf = date => {
+  const y = Number(date.slice(0, 4)), m = Number(date.slice(5, 7));
+  if (y >= 2025) return String(y);
+  if (y === 2024 && m >= 11) return "2023-2024";                   // Audax has no 2024-2025 season; the one before 2025 ends with 2024 (assumed, to be confirmed)
+  const start = m >= 11 ? y : y - 1;
+  return `${start}-${start + 1}`;
+};
 async function handleHistory(request, env, air, ctx) {
   const d = await historyDb(env);
   if (!d) return json(request, { error: "Database not ready" }, 503);
@@ -954,7 +962,7 @@ async function handleHistory(request, env, air, ctx) {
     if (ok) {
       finished++; byDistance[dist] = (byDistance[dist] || 0) + 1;
       if (/^\d+$/.test(dist)) km += Number(dist);
-      { const yr = (seasons[r.date.slice(0, 4)] ||= {}); yr[dist] = (yr[dist] || 0) + 1; }
+      { const yr = (seasons[seasonOf(r.date)] ||= {}); yr[dist] = (yr[dist] || 0) + 1; }
     }
     if (ok && /^y/i.test(r.medal || "")) medals++;                    // Audax writes "Yes" or "No" in the medal column
     const pending = !ok && ["", "DNS"].includes(String(r.result || "").trim().toUpperCase()) && r.date >= daysAgoISO(5);   // results are filled in a few days after a ride
