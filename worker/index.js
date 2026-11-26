@@ -931,17 +931,19 @@ async function handleHistory(request, env, air, ctx) {
     if (ok) {
       finished++; byDistance[dist] = (byDistance[dist] || 0) + 1;
       if (/^\d+$/.test(dist)) km += Number(dist);
-      (seasons[r.date.slice(0, 4)] ||= new Set()).add(dist);
+      { const yr = (seasons[r.date.slice(0, 4)] ||= {}); yr[dist] = (yr[dist] || 0) + 1; }
     }
     if (ok && /^y/i.test(r.medal || "")) medals++;                    // Audax writes "Yes" or "No" in the medal column
     const pending = !ok && ["", "DNS"].includes(String(r.result || "").trim().toUpperCase()) && r.date >= daysAgoISO(5);   // results are filled in a few days after a ride
     return { id: r.event_id, date: r.date, distance: dist, club: r.club, organiser: r.organiser || "", result: r.result, finished: ok, pending };
   });
-  const seasonList = Object.entries(seasons).sort((a, b) => b[0].localeCompare(a[0])).map(([year, set]) => ({
-    year, distances: [...set], sr: ["200", "300", "400", "600"].every(x => set.has(x)) }));
+  const seasonList = Object.entries(seasons).sort((a, b) => b[0].localeCompare(a[0])).map(([year, counts]) => {
+    const srCount = Math.min(...["200", "300", "400", "600"].map(x => counts[x] || 0));      // each full set of 200, 300, 400 and 600 in a year is one Super Randonneur
+    return { year, distances: Object.keys(counts), counts, srCount, sr: srCount > 0 };
+  });
   return json(request, {
     air: key, name: results[0]?.name || "", found: results.length > 0, ridden: results.length, finished, km, medals,
-    superRandonneur: seasonList.filter(s => s.sr).length, byDistance, seasons: seasonList, rides,
+    superRandonneur: seasonList.reduce((n, x) => n + x.srCount, 0), byDistance, seasons: seasonList, rides,
     coverage: { ridesRead: cover.done, since: cover.since, stillToRead: cover.todo }
   }, 200, { "Cache-Control": "public, max-age=120" });
 }
