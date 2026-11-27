@@ -1203,9 +1203,9 @@ detailEl.addEventListener("input", e => {
 
 // ---------- My rides: a rider's own history from public Audax results, looked up by AIR number ----------
 let meAir = ""; try { meAir = localStorage.getItem("sr-air") || ""; } catch (_) {}
-let meData = null, meErr = "", meBusy = false;
+let meData = null, meErr = "", meBusy = false, meF = "all";      // meF: which box of My rides is open ("all", "dns", "d:300", "s:2022-2023" ...)
 async function loadMe(air) {
-  meAir = String(air).trim(); meData = null; meErr = ""; meBusy = true;
+  meAir = String(air).trim(); meData = null; meErr = ""; meBusy = true; meF = "all";
   try { localStorage.setItem("sr-air", meAir); } catch (_) {}
   renderMe();
   try {
@@ -1225,15 +1225,28 @@ function renderMe() {
   else if (meErr) body = `<p class="note error">${esc(meErr)}</p>`;
   else if (d && !d.found) body = `<p class="note">No rides found for AIR ${esc(d.air)} yet. Rides are read from Audax's public ride pages, and the reading is still catching up (${plural(d.coverage?.stillToRead ?? 0, "ride page", "ride pages")} still to read). Check the number, or try again later.</p>`;
   else if (d) {
-    const tile = (n, l) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`;
+    const rs = d.rides.map(r => ({ ...r, status: r.status || (r.finished ? "finished" : r.pending ? "pending" : "other"), season: r.season || r.date.slice(0, 4) }));
+    const cnt = d.counts || { entered: rs.length, finished: d.finished, dns: rs.filter(r => r.status === "dns").length, dnf: rs.filter(r => r.status === "dnf").length, pending: rs.filter(r => r.status === "pending").length, other: rs.filter(r => r.status === "other").length };
+    const tile = (n, l, key) => key ? `<button type="button" class="stat click" data-mef="${esc(key)}" aria-pressed="${meF === key}"><b>${n}</b><span>${l}</span></button>` : `<div class="stat"><b>${n}</b><span>${l}</span></div>`;
+    const pick = {
+      all: ["All rides entered", () => true], finished: ["Finished rides", r => r.finished], dns: ["Did not start (DNS)", r => r.status === "dns"],
+      dnf: ["Did not finish (DNF)", r => r.status === "dnf"], pending: ["Results pending", r => r.status === "pending"], other: ["Other results (LF, YTC or no result)", r => r.status === "other"],
+      medal: ["Rides with a medal", r => r.medal]
+    };
+    for (const x of Object.keys(d.byDistance)) pick[`d:${x}`] = [`Finished ${kmLabel(x)} rides`, r => r.finished && r.distance === x];
+    for (const x of d.seasons) pick[`s:${x.year}`] = [`All rides in the ${x.year} season`, r => r.season === x.year];
+    const [pickLabel, pickFn] = pick[meF] || pick.all, shown = rs.filter(pickFn);
     body = `<h3>${esc(d.name || "Rider")} <span class="chip">AIR ${esc(d.air)}</span></h3>
-      <div class="stats">${tile(d.finished, "Rides finished")}${tile(d.km.toLocaleString("en-IN"), "Km finished")}${tile(d.superRandonneur, "Super Randonneur" + (d.superRandonneur === 1 ? "" : "s"))}${tile(d.medals, "Medals")}</div>
+      <p class="note">Tap any box to see exactly which rides it counts.</p>
+      <div class="stats">${tile(cnt.entered, "Rides entered", "all")}${tile(cnt.finished, "Rides finished", "finished")}${tile(d.km.toLocaleString("en-IN"), "Km finished", "finished")}${tile(d.superRandonneur, "Super Randonneur" + (d.superRandonneur === 1 ? "" : "s"))}${tile(d.medals, "Medals", "medal")}</div>
+      <div class="flabel">Not finished</div>
+      <div class="stats">${tile(cnt.dns, "DNS (did not start)", "dns")}${tile(cnt.dnf, "DNF (did not finish)", "dnf")}${cnt.other ? tile(cnt.other, "Other (LF, YTC)", "other") : ""}${cnt.pending ? tile(cnt.pending, "Result pending", "pending") : ""}</div>
       <div class="flabel">Finished by distance</div>
-      <div class="stats">${Object.keys(d.byDistance).sort((a, b) => (Number(a) || 1e6) - (Number(b) || 1e6)).map(x => tile(d.byDistance[x], kmLabel(x))).join("") || `<p class="note">No finished rides yet.</p>`}</div>
+      <div class="stats">${Object.keys(d.byDistance).sort((a, b) => (Number(a) || 1e6) - (Number(b) || 1e6)).map(x => tile(d.byDistance[x], kmLabel(x), `d:${x}`)).join("") || `<p class="note">No finished rides yet.</p>`}</div>
       <div class="flabel">Season by season</div>
-      <p class="note">Seasons follow Audax: before 2025 a season runs 1 Nov to 31 Oct (for example 2022-2023); from 2025 it is the calendar year.</p><div class="seasonrows">${d.seasons.map(x => `<div class="srow"><b>${esc(x.year)}</b><span>${["200", "300", "400", "600"].map(k => `<span class="dot ${x.counts?.[k] || x.distances.includes(k) ? "on" : ""}">${k}${x.counts?.[k] > 1 ? ` ×${x.counts[k]}` : ""}</span>`).join("")}</span>${x.sr ? `<span class="chip">${x.srCount > 1 ? `${x.srCount} Super Randonneurs` : "Super Randonneur"}</span>` : ""}</div>`).join("") || `<p class="note">No finished seasons yet.</p>`}</div>
-      <div class="flabel">All rides entered (${d.ridden}). Only finished rides count towards the totals above</div>
-      <div class="ilist">${d.rides.map(r => `<a class="irow" href="#e${esc(r.id)}"><span class="irow-date">${esc(dayLabel(r.date))}<small>${esc(r.date.slice(0, 4))}</small></span><span class="irow-main"><b>${esc(kmLabel(r.distance))}</b>${r.organiser ? ` <span class="orgline">${logoHtml(r.organiser.split(" · ").pop(), "sm")} ${esc(r.organiser.split(" · ").pop())}</span>` : ""}<small>${r.organiser ? "Organised by " + esc(r.organiser) + (r.club ? " · rode for " + esc(r.club) : "") : esc(r.club)}</small></span><span class="irow-st${r.finished ? "" : " dim"}">${esc(r.finished ? r.result : r.pending ? "Result pending" : (r.result || "Registered"))}</span></a>`).join("")}</div>
+      <p class="note">Seasons follow Audax: before 2025 a season runs 1 Nov to 31 Oct (for example 2022-2023); from 2025 it is the calendar year. Tap a season to see its rides.</p><div class="seasonrows">${d.seasons.map(x => `<div class="srow click" role="button" tabindex="0" data-mef="s:${esc(x.year)}" aria-pressed="${meF === "s:" + x.year}"><b>${esc(x.year)}</b><span>${["200", "300", "400", "600"].map(k => `<span class="dot ${x.counts?.[k] || x.distances.includes(k) ? "on" : ""}">${k}${x.counts?.[k] > 1 ? ` ×${x.counts[k]}` : ""}</span>`).join("")}</span>${x.sr ? `<span class="chip">${x.srCount > 1 ? `${x.srCount} Super Randonneurs` : "Super Randonneur"}</span>` : ""}</div>`).join("") || `<p class="note">No finished seasons yet.</p>`}</div>
+      <div class="flabel" id="meList">${esc(pickLabel)} (${shown.length})${meF === "all" ? ". Only finished rides count towards the totals above" : ` · <button type="button" class="linkbtn" data-mef="all">Show all rides</button>`}</div>
+      <div class="ilist">${shown.map(r => `<a class="irow" href="#e${esc(r.id)}"><span class="irow-date">${esc(dayLabel(r.date))}<small>${esc(r.date.slice(0, 4))}</small></span><span class="irow-main"><b>${esc(kmLabel(r.distance))}</b>${r.organiser ? ` <span class="orgline">${logoHtml(r.organiser.split(" · ").pop(), "sm")} ${esc(r.organiser.split(" · ").pop())}</span>` : ""}<small>${r.organiser ? "Organised by " + esc(r.organiser) + (r.club ? " · rode for " + esc(r.club) : "") : esc(r.club)}</small></span><span class="irow-st${r.finished ? "" : " dim"}">${esc(r.finished ? r.result : r.pending ? "Result pending" : (r.result || "Registered"))}${r.medal ? " 🏅" : ""}</span></a>`).join("") || `<p class="note">No rides in this group.</p>`}</div>
       <p class="note">From public Audax ride pages, read since ${esc(d.coverage?.since || "…")}${d.coverage?.stillToRead ? `; ${plural(d.coverage.stillToRead, "page", "pages")} still being read, so older rides may be missing` : ""}. Audax's own records are the official ones.</p>`;
   }
   detailEl.innerHTML = `<h2>My rides</h2><p class="note">Type a name or an AIR number to see a rider’s history: rides done, distances, Super Randonneur years and medals. No password is needed because this comes from public ride results.</p>${form}${body}`;
@@ -1258,6 +1271,10 @@ detailEl.addEventListener("input", e => {
   }, 250);
 });
 detailEl.addEventListener("click", e => { const b = e.target.closest("[data-me-air]"); if (b && current === "me") loadMe(b.dataset.meAir); });
+// Boxes in My rides open the list of rides they count; tapping the same box again shows everything
+const pickMeBox = b => { if (!b || current !== "me") return; meF = meF === b.dataset.mef && meF !== "all" ? "all" : b.dataset.mef; renderMe(); document.getElementById("meList")?.scrollIntoView({ behavior: "smooth", block: "start" }); };
+detailEl.addEventListener("click", e => pickMeBox(e.target.closest("[data-mef]")));
+detailEl.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches?.('.srow[data-mef]')) pickMeBox(e.target); });
 detailEl.addEventListener("submit", e => {
   if (e.target.id !== "meForm") return; e.preventDefault();
   const v = document.getElementById("meAir").value.trim(); if (!v) return;

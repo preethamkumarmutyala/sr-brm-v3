@@ -393,3 +393,8 @@ a.irow:hover { border-color: var(--brand); }
 .pickrow small{color:var(--muted)}
 .deskclub{display:inline-block;margin:.2rem .6rem .2rem 0}
 .accessform{display:flex;flex-direction:column;gap:.6rem;align-items:stretch}
+
+button.stat.click{font:inherit;color:inherit;text-align:left;cursor:pointer;width:100%}
+.stat.click:hover,.srow.click:hover{border-color:var(--brand)}
+.stat.click[aria-pressed="true"],.srow.click[aria-pressed="true"]{border-color:var(--brand);box-shadow:0 0 0 2px color-mix(in srgb,var(--brand) 55%,transparent)}
+.srow.click{cursor:pointer}

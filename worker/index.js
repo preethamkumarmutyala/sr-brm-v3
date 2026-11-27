@@ -957,6 +957,7 @@ async function handleHistory(request, env, air, ctx) {
   const sinceN = await mv("cov_since"), cover = { done: await mv("cov_done"), todo: await mv("cov_todo"), since: sinceN ? `${String(sinceN).slice(0, 4)}-${String(sinceN).slice(4, 6)}-${String(sinceN).slice(6)}` : null };
   const byDistance = {}, seasons = {};
   let km = 0, finished = 0, medals = 0;
+  const counts = { entered: results.length, finished: 0, dns: 0, dnf: 0, pending: 0, other: 0 };
   const rides = results.map(r => {
     const ok = isFinished(r.result), dist = /^fl/i.test(r.distance) ? "Fleche" : r.distance;
     if (ok) {
@@ -966,14 +967,17 @@ async function handleHistory(request, env, air, ctx) {
     }
     if (ok && /^y/i.test(r.medal || "")) medals++;                    // Audax writes "Yes" or "No" in the medal column
     const pending = !ok && ["", "DNS"].includes(String(r.result || "").trim().toUpperCase()) && r.date >= daysAgoISO(5);   // results are filled in a few days after a ride
-    return { id: r.event_id, date: r.date, distance: dist, club: r.club, organiser: r.organiser || "", result: r.result, finished: ok, pending };
+    const res = String(r.result || "").trim().toUpperCase();
+    const status = ok ? "finished" : pending ? "pending" : res === "DNS" ? "dns" : res === "DNF" ? "dnf" : "other";      // other: LF, YTC or no result
+    counts[status]++;
+    return { id: r.event_id, date: r.date, distance: dist, club: r.club, organiser: r.organiser || "", result: r.result, finished: ok, pending, status, medal: ok && /^y/i.test(r.medal || ""), season: seasonOf(r.date) };
   });
   const seasonList = Object.entries(seasons).sort((a, b) => b[0].localeCompare(a[0])).map(([year, counts]) => {
     const srCount = Math.min(...["200", "300", "400", "600"].map(x => counts[x] || 0));      // each full set of 200, 300, 400 and 600 in a year is one Super Randonneur
     return { year, distances: Object.keys(counts), counts, srCount, sr: srCount > 0 };
   });
   return json(request, {
-    air: key, name: results[0]?.name || "", found: results.length > 0, ridden: results.length, finished, km, medals,
+    air: key, name: results[0]?.name || "", found: results.length > 0, ridden: results.length, finished, km, medals, counts,
     superRandonneur: seasonList.reduce((n, x) => n + x.srCount, 0), byDistance, seasons: seasonList, rides,
     coverage: { ridesRead: cover.done, since: cover.since, stillToRead: cover.todo }
   }, 200, { "Cache-Control": "public, max-age=120" });
